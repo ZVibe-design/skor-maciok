@@ -1,0 +1,16 @@
+{
+  "name": "Pencatat Skor Maciok",
+  "short_name": "Skor Maciok",
+  "description": "Pencatat skor maciok Kim-joker untuk satu meja. Semua hitungan dalam poin.",
+  "lang": "id",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": ".",
+  "scope": ".",
+  "theme_color": "#12312A",
+  "background_color": "#12312A",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

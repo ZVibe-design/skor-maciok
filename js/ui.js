@@ -1,0 +1,1275 @@
+// P3 scoring app — render and event wiring. The only module that touches the DOM.
+//
+// It reads state through store.js and prices it with settle.js, and does no
+// arithmetic of its own. DECISIONS.md C1 makes that boundary load-bearing: a
+// correction from the field test has to cost settle.js plus an `npm test` re-run,
+// which stops being true the moment a score is computed here.
+
+import { DEFAULT_START, FU_FLOOR_CITE, FU_FLOOR_TAY, HU_METHODS, KOIN, MIN_FU_TAY, PENALTY_ROWS, PING_FU_CITE, PING_FU_REMINDER } from "./rules.js";
+import { SEATS, store } from "./store.js";
+import { applyFuFloor, balancesFrom, cancellations, loanTotals, scoresFrom, settleUp, transfersFor } from "./settle.js";
+import { EXPORT_MESSAGES, IMPORT_MESSAGES, ImportError, exportGame, importGame } from "./io.js";
+
+/** The name shown for a seat. The compass letter N/E/S/W lives in index.html. */
+const SEAT_LABEL = { tung: "Tung", nan: "Nan", si: "Si", pei: "Pei" };
+
+/**
+ * Wind order (Tung→Pei = E,S,W,N), which is `SEATS` itself, rather than the
+ * diamond's compass order. Named once and used by both lists: the board and the
+ * ledger are two renderings of one roster, and two copies of this comparator are
+ * two chances for them to disagree about who comes first.
+ */
+const windOrder = (a, b) => SEATS.indexOf(a.seat) - SEATS.indexOf(b.seat);
+
+/** Six digits is 999999 tay — past any real hand, and short of a runaway entry. */
+const MAX_TAY_DIGITS = 6;
+
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+/** Table text is never locale-grouped: `Σ 1200`, never `Σ 1.200`. */
+const fmt = (n) => String(n);
+
+const show = (...els) => els.forEach((el) => (el.hidden = false));
+const hide = (...els) => els.forEach((el) => (el.hidden = true));
+
+let sheetPlayerId = null;
+
+// ── views ────────────────────────────────────────────────────────────────────
+
+function setView(name) {
+  document.body.dataset.view = name;
+  for (const b of $$(".tabbar button")) {
+    b.setAttribute("aria-current", String(b.dataset.goto === name));
+  }
+}
+
+// ── render ───────────────────────────────────────────────────────────────────
+
+function renderBanner() {
+  const msg = store.problemMessage();
+  const el = $("#banner");
+  el.hidden = !msg;
+  if (msg) el.textContent = msg;
+}
+
+function renderTable() {
+  const { players, events, start } = store.state();
+  const scores = scoresFrom(events, players, start);
+  let total = 0;
+
+  for (const seat of SEATS) {
+    const el = $(`.seat[data-seat="${seat}"]`);
+    const p = players.find((x) => x.seat === seat);
+    const skor = p ? (scores.get(p.id) ?? start) : 0;
+    total += skor;
+
+    el.dataset.player = p?.id ?? "";
+    el.disabled = !p;
+    $(".seat-nama", el).textContent = p ? p.name : "—";
+    $(".seat-skor", el).textContent = p ? fmt(skor) : "—";
+    el.setAttribute(
+      "aria-label",
+      p ? `${p.name}, ${SEAT_LABEL[seat]}, skor ${fmt(skor)}` : `Kursi ${SEAT_LABEL[seat]} kosong`,
+    );
+  }
+
+  // n × start, where n is the number of players — not a literal 4 × a literal 300.
+  // `start` is read from state everywhere; the only 300 in the app is in rules.js.
+  const diharapkan = start * players.length;
+  $("#plaque-total").textContent = fmt(total);
+  $("#plaque").dataset.anomali = String(players.length > 0 && total !== diharapkan);
+}
+
+function render() {
+  renderBanner();
+  renderTable();
+  renderSkor();
+  renderUtang();
+  renderSelesai();
+}
+
+// ── skor — the four-row board, then the log newest-first ─────────────────────
+//
+// Every number on this screen is priced by settle.js and read back out of its own
+// output — never re-derived here (C1). The delta column is a sum over what
+// `transfersFor()` returned: nothing in this section knows that a taCung discarder
+// pays double, it adds up what the engine moved and names the player it moved to or
+// from. That is what keeps this screen and the committed scores from disagreeing.
+
+/** `+78` / `−26` / `0`. The sign is explicit so a gain cannot be misread as a loss. */
+function fmtNet(n) {
+  if (n > 0) return `+${n}`;
+  // U+2212 MINUS SIGN, not a hyphen: this is a numeral, and it must line up in the
+  // tabular column the way the digits do.
+  if (n < 0) return `−${-n}`;
+  return "0";
+}
+
+/**
+ * What one event moved for the player it names, as the log currently stands.
+ *
+ * `null` — not `0` — for the two rows that move nothing, because a typed `0` would
+ * claim a movement that did not happen. An `utang` is settled at `selesai`, not on
+ * the scoreboard (Task 10 states this on screen), and a `koreksi` has no arithmetic
+ * of its own at all: settle.js refuses to price one, which is why it is answered
+ * before `transfersFor` is ever called.
+ */
+function eventDelta(event, players) {
+  if (event.type === "koreksi") return null;
+  const transfers = transfersFor(event, players);
+  const sum = (pick) => transfers.filter(pick).reduce((s, t) => s + t.amount, 0);
+  switch (event.type) {
+    case "hu":      return sum((t) => t.to === event.winnerId);
+    case "koin":    return sum((t) => t.to === event.collectorId);
+    case "penalty": return -sum((t) => t.from === event.offenderId);
+    case "utang":   return null;
+    default:        return null;
+  }
+}
+
+/**
+ * One history line. Labels come from rules.js — no Hu method, koin combination or
+ * penalty row is retyped here, so a rename in the tables reaches this list.
+ *
+ * Every event type is listed, `utang` included. The history is the log, and a log
+ * view that drops rows cannot be checked against the scores beside it — worse, a
+ * `koreksi` cancelling an invisible row would be a reference to nothing. Task 10
+ * gives loans a ledger of their own; this is the chronological view of the same log,
+ * not a second one.
+ */
+function eventText(event, seqOf) {
+  const players = store.state().players;
+  const of = (id) => players.find((x) => x.id === id);
+  const seat = (id) => SEAT_LABEL[of(id)?.seat] ?? "—";
+  const nama = (id) => of(id)?.name ?? "—";
+
+  switch (event.type) {
+    case "hu":
+      return `${HU_METHODS[event.method].label} · ${seat(event.winnerId)} · ${event.tay} tay`;
+    case "koin":
+      return `Koin ${KOIN[event.kind].label} · ${seat(event.collectorId)} · ${KOIN[event.kind].amount} koin`;
+    case "penalty": {
+      const row = PENALTY_ROWS.find((r) => r.no === event.row);
+      return `Penalti · ${nama(event.offenderId)}${row ? ` · ${row.name}` : ""}`;
+    }
+    case "utang":
+      return `Utang · ${nama(event.borrowerId)} dari ${nama(event.lenderId)} · ${event.amount} poin`;
+    case "koreksi":
+      return `Koreksi #${seqOf(event.corrects) ?? "?"}`;
+    default:
+      return event.type;
+  }
+}
+
+/**
+ * Undo. A `koreksi` is appended; nothing is ever removed (LAW 5, SPEC.md rule 6).
+ *
+ * No confirm step, deliberately: the action is itself an event, so undoing the undo
+ * puts the row back. A dialog guarding a reversible append-only action is friction
+ * that protects nothing — and it would sit on the one control a player reaches for
+ * mid-round.
+ */
+function appendKoreksi(targetId, errorSel = "#skor-error") {
+  try {
+    store.undo(targetId);
+  } catch (e) {
+    // The target came from the log as it stood at render time. If it has gone since
+    // — a second tab's undo, or an import — say so rather than closing over the
+    // failure and letting the tap read as success.
+    //
+    // The message goes to the caller's own error line, because the same control now
+    // sits on two screens: a failure reported into `#skor-error` while the player is
+    // looking at the utang ledger is a message they will never see.
+    const el = $(errorSel);
+    el.hidden = false;
+    el.textContent = e.message;
+    return;
+  }
+  $(errorSel).hidden = true;
+  render();
+}
+
+function renderSkor() {
+  const { players, events, start } = store.state();
+  const scores = scoresFrom(events, players, start);
+  const cancelled = cancellations(events);
+  const seqOf = (id) => events.find((e) => e.id === id)?.seq;
+
+  // ── the board ──────────────────────────────────────────────────────────────
+  // This is a list, and the table's geometry is a fact about the table, not about
+  // a player — so wind order, not the diamond's compass order. See `windOrder`.
+  const papan = $("#skor-papan");
+  papan.replaceChildren();
+  for (const p of [...players].sort(windOrder)) {
+    const skor = scores.get(p.id) ?? start;
+    const li = document.createElement("li");
+    li.className = "papan-baris";
+
+    const tile = document.createElement("img");
+    tile.className = "tile";
+    tile.src = `tiles/${p.seat}.svg`;
+    tile.alt = SEAT_LABEL[p.seat] ?? "";
+
+    const nama = document.createElement("span");
+    nama.className = "papan-nama";
+    nama.textContent = p.name;
+
+    const angka = document.createElement("span");
+    angka.className = "papan-skor";
+    angka.textContent = fmt(skor);
+
+    const net = document.createElement("span");
+    net.className = "papan-net";
+    // The sign alone is not speech. A screen reader hears "plus 12" as easily as
+    // "12", so the word goes in a span only it reads.
+    const sr = document.createElement("span");
+    sr.className = "sr-only";
+    sr.textContent = "selisih ";
+    net.append(sr, document.createTextNode(fmtNet(skor - start)));
+
+    li.append(tile, nama, angka, net);
+    papan.append(li);
+  }
+
+  // Summed from the same map the rows were read from, so the footer cannot disagree
+  // with the column above it. `n × start` — not a literal 4 × a literal 300.
+  const total = [...scores.values()].reduce((s, v) => s + v, 0);
+  const diharapkan = start * players.length;
+  $("#skor-angka").textContent = fmt(total);
+  $("#skor-harap").textContent = fmt(diharapkan);
+  $("#skor-total").dataset.anomali = String(players.length > 0 && total !== diharapkan);
+
+  // ── the log ────────────────────────────────────────────────────────────────
+  const kosong = events.length === 0;
+  $("#skor-kosong").hidden = !kosong;
+  $("#skor-riwayat").hidden = kosong;
+
+  const riwayat = $("#skor-riwayat");
+  riwayat.replaceChildren();
+  // Newest first, by array order rather than by `seq`: `seq` is monotonic but an
+  // imported log need not be contiguous, and array order is what `resolveEvents`
+  // walks — so this list and the arithmetic cannot disagree about which koreksi is
+  // the later one.
+  for (const event of [...events].reverse()) {
+    const nonaktif = cancelled.has(event.id);
+    const li = document.createElement("li");
+    li.className = "riwayat-baris";
+    li.dataset.nonaktif = String(nonaktif);
+
+    const seq = document.createElement("span");
+    seq.className = "riwayat-seq";
+    seq.textContent = `#${event.seq}`;
+
+    const isi = document.createElement("span");
+    isi.className = "riwayat-isi";
+    isi.textContent = eventText(event, seqOf);
+
+    const d = eventDelta(event, players);
+    const delta = document.createElement("span");
+    delta.className = "riwayat-delta";
+    delta.textContent = d === null ? "—" : fmtNet(d);
+
+    // The target is the *active* koreksi when this row is already cancelled, not the
+    // row itself. Targeting the row appends a second koreksi pointing at the same
+    // event, which leaves it cancelled — a row appears and nothing moves. Measured
+    // against `resolveEvents` before this was written; see `cancellations`.
+    const target = cancelled.get(event.id) ?? event.id;
+    const aksi = document.createElement("button");
+    aksi.type = "button";
+    aksi.className = "riwayat-aksi";
+    aksi.textContent = nonaktif ? "Pulihkan" : "Batalkan";
+    aksi.setAttribute("aria-label", `${aksi.textContent} #${event.seq}`);
+    aksi.addEventListener("click", () => appendKoreksi(target));
+
+    li.append(seq, isi, delta, aksi);
+    riwayat.append(li);
+  }
+}
+
+// ── utang — the ledger, and the form that adds to it ─────────────────────────
+//
+// A loan moves no score (DECISIONS.md — "P3 Utang Are a Ledger, Not a Transfer"),
+// so nothing on this screen touches `scoresFrom`. What it shows instead is who owes
+// whom, which the scoreboard cannot answer: `skor` says what each player won,
+// `selesai` says what each player pays, and this is the ledger both of them leave
+// out. The totals come from `loanTotals()` rather than being summed here, for the
+// same reason the board's numbers come from `scoresFrom()` (C1).
+
+/** The roster the two selects were last built for, so a render does not reset them. */
+let utangRoster = "";
+
+/**
+ * Fill the borrower/lender selects, in wind order, when the roster has changed.
+ *
+ * Rebuild-on-every-render would be simpler and wrong: `render()` runs on every
+ * append and undo, so a player who picked a lender and was still typing an amount
+ * would have their selection wiped by someone else's undo. The signature is the
+ * roster's own values, so a rename or a seat swap rebuilds and an unrelated event
+ * does not.
+ */
+function fillUtangOptions() {
+  const { players } = store.state();
+  const sig = players.map((p) => `${p.id}:${p.name}`).join("|");
+  if (sig === utangRoster) return;
+  utangRoster = sig;
+
+  for (const sel of [$("#utang-borrower"), $("#utang-lender")]) {
+    const keep = sel.value;
+    sel.replaceChildren();
+    for (const p of [...players].sort(windOrder)) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.append(opt);
+    }
+    // A selection that still exists survives a roster edit; one that does not
+    // falls to the browser's first option rather than to an empty select.
+    if (players.some((p) => p.id === keep)) sel.value = keep;
+  }
+}
+
+function setUtangError(msg) {
+  const el = $("#utang-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+function renderUtang() {
+  const { players, events } = store.state();
+  fillUtangOptions();
+  const totals = loanTotals(events, players);
+  const cancelled = cancellations(events);
+  const seqOf = (id) => events.find((e) => e.id === id)?.seq;
+
+  // ── the running totals ─────────────────────────────────────────────────────
+  const papan = $("#utang-papan");
+  papan.replaceChildren();
+  let dipinjam = 0;
+  let dipinjamkan = 0;
+  for (const p of [...players].sort(windOrder)) {
+    const t = totals.get(p.id) ?? { borrowed: 0, lent: 0 };
+    dipinjam += t.borrowed;
+    dipinjamkan += t.lent;
+
+    const li = document.createElement("li");
+    li.className = "utang-baris";
+    const nama = document.createElement("span");
+    nama.className = "utang-nama";
+    nama.textContent = p.name;
+    const angka = document.createElement("span");
+    angka.className = "utang-angka";
+    angka.textContent = `meminjam ${fmt(t.borrowed)} · meminjamkan ${fmt(t.lent)}`;
+    li.append(nama, angka);
+    papan.append(li);
+  }
+
+  // Summed from the same map the rows were read from, so the footer cannot disagree
+  // with the column above it. Σ borrowed === Σ lent holds by construction — every
+  // loan adds to both sides at once — so `data-anomali` is unreachable here exactly
+  // as it is on the scoreboard, and is kept because this is the other half of the
+  // same promise rather than because it can fire.
+  $("#utang-dipinjam").textContent = fmt(dipinjam);
+  $("#utang-dipinjamkan").textContent = fmt(dipinjamkan);
+  $("#utang-total").dataset.anomali = String(players.length > 0 && dipinjam !== dipinjamkan);
+
+  // ── the ledger ─────────────────────────────────────────────────────────────
+  // Cancelled rows stay in the list, struck through, for the same reason they stay
+  // in the history: a correction is a row, and a ledger that hid one could not be
+  // checked against the log. The empty state therefore keys on the utang rows rather
+  // than on `events.length` — a night of hands with no loans in it is not empty.
+  const loans = events.filter((e) => e.type === "utang");
+  $("#utang-kosong").hidden = loans.length > 0;
+  $("#utang-riwayat").hidden = loans.length === 0;
+
+  const riwayat = $("#utang-riwayat");
+  riwayat.replaceChildren();
+  for (const event of [...loans].reverse()) {
+    const nonaktif = cancelled.has(event.id);
+    const li = document.createElement("li");
+    li.className = "riwayat-baris";
+    li.dataset.nonaktif = String(nonaktif);
+
+    const seq = document.createElement("span");
+    seq.className = "riwayat-seq";
+    seq.textContent = `#${event.seq}`;
+
+    // The same sentence the history shows for this row, from the same function —
+    // the ledger is not a second wording of the log, and two renderers would be two
+    // things to keep true.
+    const isi = document.createElement("span");
+    isi.className = "riwayat-isi";
+    isi.textContent = eventText(event, seqOf);
+    if (typeof event.note === "string" && event.note !== "") {
+      const note = document.createElement("span");
+      note.className = "utang-note";
+      note.textContent = event.note;
+      isi.append(note);
+    }
+
+    // The active koreksi's id, not the row's — the same trap the history Undo has,
+    // and the same walk answers it. See `cancellations`.
+    const target = cancelled.get(event.id) ?? event.id;
+    const aksi = document.createElement("button");
+    aksi.type = "button";
+    aksi.className = "riwayat-aksi";
+    aksi.textContent = nonaktif ? "Pulihkan" : "Batalkan";
+    aksi.setAttribute("aria-label", `${aksi.textContent} #${event.seq}`);
+    aksi.addEventListener("click", () => appendKoreksi(target, "#utang-error"));
+
+    li.append(seq, isi, aksi);
+    riwayat.append(li);
+  }
+}
+
+/**
+ * Record a loan. The score is not touched, here or anywhere downstream of it.
+ *
+ * The borrower and lender lists are both complete and the rule is checked on submit
+ * rather than enforced by filtering the second list. Filtering would make the
+ * invalid choice unreachable and with it the message — and a table where a player
+ * taps the wrong name needs the record to say what the rule is, not a list that
+ * quietly moved.
+ */
+function submitUtang(ev) {
+  ev.preventDefault();
+  const borrowerId = $("#utang-borrower").value;
+  const lenderId = $("#utang-lender").value;
+  const amount = Number($("#utang-amount").value);
+  const note = $("#utang-note").value.trim();
+
+  if (borrowerId === lenderId) return setUtangError("Peminjam dan pemberi harus pemain yang berbeda.");
+  if (!Number.isInteger(amount) || amount <= 0) {
+    return setUtangError("Jumlah harus bilangan bulat lebih dari 0.");
+  }
+
+  const event = { type: "utang", borrowerId, lenderId, amount };
+  if (note !== "") event.note = note;
+  try {
+    store.append(event);
+  } catch (e) {
+    // Stay on the view and say so. An append that threw recorded nothing, so
+    // clearing the form here would read as success and lose the loan silently.
+    return setUtangError(e.message);
+  }
+
+  // The two selects keep their values: a table usually borrows more than once, and
+  // re-picking the same pair is the common case. The amount and the note do not —
+  // a loan's amount is the one field that must never be carried over.
+  $("#utang-amount").value = "";
+  $("#utang-note").value = "";
+  setUtangError(null);
+  render();
+}
+
+// ── selesai — hasil, utang, transfer akhir ───────────────────────────────────
+//
+// Three blocks, one question. They share a screen because none of them is readable
+// alone: a net of +150 beside a loan of 200 is a player who still owes 50, and only
+// the balance knows that. `skor` says what each player won, `utang` says what each
+// player borrowed, and this is the only screen that puts the two together into the
+// list of payments that actually ends the night.
+//
+// Nothing here is arithmetic (C1). The net comes from `scoresFrom`, the loans from
+// `loanTotals`, the balances from `balancesFrom`, and the transfers are `settleUp`'s
+// own array rendered in its own order — this view does not shorten the list, merge
+// two payments, or re-sort it, so what is on screen is what the engine computed.
+
+function renderSelesai() {
+  const { players, events, start } = store.state();
+  const scores = scoresFrom(events, players, start);
+  // The *settlement* balance, not the game net: `balancesFrom` folds every loan in,
+  // which is what makes the transfer list below the one that squares the table.
+  const balances = balancesFrom(events, players, start);
+  const totals = loanTotals(events, players);
+  const transfers = settleUp(balances);
+  const roster = [...players].sort(windOrder);
+  const nama = (id) => players.find((p) => p.id === id)?.name ?? "—";
+  const kosong = events.length === 0;
+
+  // ── 1. Hasil permainan — what each player won at the table ─────────────────
+  const hasil = $("#selesai-hasil");
+  hasil.replaceChildren();
+  for (const p of roster) {
+    const skor = scores.get(p.id) ?? start;
+    const li = document.createElement("li");
+    li.className = "papan-baris";
+
+    const n = document.createElement("span");
+    n.className = "papan-nama";
+    n.textContent = p.name;
+
+    const s = document.createElement("span");
+    s.className = "papan-skor";
+    s.textContent = fmt(skor);
+
+    const net = document.createElement("span");
+    net.className = "papan-net";
+    const sr = document.createElement("span");
+    sr.className = "sr-only";
+    sr.textContent = "selisih ";
+    net.append(sr, document.createTextNode(fmtNet(skor - start)));
+
+    li.append(n, s, net);
+    hasil.append(li);
+  }
+
+  // ── 2. Utang — what each player borrowed and lent ──────────────────────────
+  // One row per player carrying both figures, from the same `loanTotals` call the
+  // ledger makes: the two screens are two renderings of one fact, and two sums of it
+  // would be two chances to disagree. Σ dipinjam === Σ dipinjamkan holds by the same
+  // construction it does there — every loan adds to both sides at once.
+  const utang = $("#selesai-utang");
+  utang.replaceChildren();
+  let adaUtang = false;
+  for (const p of roster) {
+    const t = totals.get(p.id) ?? { borrowed: 0, lent: 0 };
+    if (t.borrowed > 0 || t.lent > 0) adaUtang = true;
+
+    const li = document.createElement("li");
+    li.className = "utang-baris";
+    const n = document.createElement("span");
+    n.className = "utang-nama";
+    n.textContent = p.name;
+    const a = document.createElement("span");
+    a.className = "utang-angka";
+    a.textContent = `meminjam ${fmt(t.borrowed)} · meminjamkan ${fmt(t.lent)}`;
+    li.append(n, a);
+    utang.append(li);
+  }
+  utang.hidden = !adaUtang;
+  // Suppressed when the whole log is empty: the invitation at the foot of the screen
+  // already says nothing has happened, and a second "nothing here" above it reads as
+  // two different facts rather than one.
+  $("#selesai-utang-kosong").hidden = adaUtang || kosong;
+
+  // ── 3. Transfer akhir — who pays whom, in as few movements as possible ─────
+  const list = $("#selesai-transfer");
+  list.replaceChildren();
+  for (const t of transfers) {
+    const li = document.createElement("li");
+    li.className = "transfer-baris";
+    // The arrow is directional data, not decoration — SPEC.md's one permitted `→`.
+    li.textContent = `${nama(t.from)} → ${nama(t.to)}: ${fmt(t.amount)} poin`;
+    list.append(li);
+  }
+
+  // The count is the list's own length; the bound is `n − 1`, which is what the
+  // greedy pass guarantees. Printed only while it holds: a bound shown beside a list
+  // that broke it would be the screen lying about the arithmetic, and this view is
+  // the one place that must not.
+  const batas = players.length > 0 ? players.length - 1 : 0;
+  $("#selesai-jumlah").textContent = fmt(transfers.length);
+  const elBatas = $("#selesai-batas");
+  elBatas.hidden = !(players.length > 0 && transfers.length <= batas);
+  elBatas.textContent = `· ≤ ${fmt(batas)} transfer`;
+
+  $("#selesai-kosong").hidden = !kosong;
+}
+
+// ── setup — a first-run sheet over meja, not a fifth view ────────────────────
+
+function setSetupError(msg) {
+  const el = $("#setup-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+function openSetup() {
+  const { players, start } = store.state();
+  $$("#setup-form .peserta").forEach((row, i) => {
+    const p = players[i];
+    $("input", row).value = p?.name ?? "";
+    $("select", row).value = p?.seat ?? SEATS[i];
+  });
+  $("#setup-start").value = fmt(start ?? DEFAULT_START);
+  setSetupError(null);
+  // The archive area resets with the form: a refusal left over from a file chosen
+  // last time describes a table the player has since left, and a pending confirm
+  // would name a log that is no longer the one on screen.
+  setIoError(null);
+  closeIoConfirm();
+  show($("#setup"), $("#scrim"));
+}
+
+function submitSetup(ev) {
+  ev.preventDefault();
+  const rows = $$("#setup-form .peserta");
+  const existing = store.state().players;
+  const names = rows.map((r) => $("input", r).value.trim());
+  const seats = rows.map((r) => $("select", r).value);
+  const start = Number($("#setup-start").value);
+
+  if (names.some((n) => n === "")) return setSetupError("Isi nama keempat pemain.");
+  if (new Set(seats).size !== SEATS.length) return setSetupError("Setiap pemain harus dapat kursi yang berbeda.");
+  if (!Number.isInteger(start) || start < 0) return setSetupError("Modal awal harus bilangan bulat 0 atau lebih.");
+
+  try {
+    // Ids are carried over by position, so re-running setup to fix a typo does not
+    // orphan the events already in the log (store.setPlayers, Task 3).
+    store.setStart(start);
+    store.setPlayers(rows.map((_, i) => ({ id: existing[i]?.id, name: names[i], seat: seats[i] })));
+  } catch (e) {
+    return setSetupError(e.message);
+  }
+
+  hide($("#setup"), $("#scrim"));
+  render();
+}
+
+// ── arsip — export the log, import one back ──────────────────────────────────
+//
+// Export is the archive path (LAW 5), and the safety net for the storage failure
+// store.js reports as `corrupt` — the one failure a player can recover from
+// without losing the night's game.
+//
+// Import is the sharp end: it is the only door in this app that throws away a live
+// log. So the flow is deliberately three steps with a stop between the second and
+// third — read the file, say out loud what is about to be replaced, and only then
+// write. `importGame` reads and returns; nothing is stored until `#io-ya`.
+
+/** The payload from a file that cleared io.js, waiting on the confirm. */
+let pendingImport = null;
+
+function setIoError(msg) {
+  const el = $("#io-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+/**
+ * What the confirm says, built from the live log at the moment it is asked.
+ *
+ * A confirm reading only "replace your data?" is a dialog a player taps through;
+ * the sentence that makes them stop is the one naming what they are about to lose.
+ * Built here rather than written into index.html so it can never describe a table
+ * other than the one on screen — measured: the same file is as often the wrong one
+ * as the right one, and the player is the only one who can tell.
+ */
+function ioLossText() {
+  const { events, players } = store.state();
+  const nama = players.map((p) => p.name).join(", ");
+  if (events.length === 0 && players.length === 0) {
+    return "Belum ada catatan di meja ini, jadi impor tidak menghilangkan apa pun. Lanjut?";
+  }
+  if (events.length === 0) {
+    return `Meja ini belum punya kejadian, tapi nama dan modal pemainnya (${nama}) akan digantikan. Lanjut?`;
+  }
+  return `Impor menggantikan catatan sekarang — ${fmt(events.length)} kejadian untuk ${nama}. Lanjut?`;
+}
+
+/**
+ * Drop the pending payload and shut the confirm. Also clears the file input:
+ * choosing the *same* file twice fires no `change` event, so a player who cancels
+ * and immediately re-picks the file they just picked would see nothing happen.
+ */
+function closeIoConfirm() {
+  pendingImport = null;
+  $("#io-konfirmasi").hidden = true;
+  $("#io-tanya").textContent = "";
+  $("#io-file").value = "";
+}
+
+/** Nothing typed into #io-file is a choice; a chosen file is a question. */
+async function chooseImportFile(ev) {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  setIoError(null);
+  let payload;
+  try {
+    payload = await importGame(file);
+  } catch (e) {
+    // io.js throws ImportError with a message already fit for the screen; anything
+    // else (a File whose text() is unimplemented, say) is still a file we cannot
+    // use, and saying so beats an uncaught rejection with no console on a phone.
+    closeIoConfirm();
+    return setIoError(e instanceof ImportError ? e.message : IMPORT_MESSAGES.unreadable);
+  }
+  pendingImport = payload;
+  $("#io-tanya").textContent = ioLossText();
+  $("#io-konfirmasi").hidden = false;
+}
+
+function confirmImport() {
+  if (!pendingImport) return closeIoConfirm();
+  try {
+    // replace() re-validates every player and every event against the rules, so a
+    // file that cleared io.js's two gates can still be refused here — the gates
+    // there are about the file, and this one is about the game.
+    store.replace(pendingImport);
+  } catch {
+    closeIoConfirm();
+    return setIoError(IMPORT_MESSAGES.replaceFailed);
+  }
+  closeIoConfirm();
+  setSetupError(null);
+  hide($("#setup"), $("#scrim"));
+  render();
+}
+
+function doExport() {
+  setIoError(null);
+  // Deliberately does NOT drop a pending import: backing up the current log before
+  // replacing it is the safe move, and the confirm's sentence is still true after
+  // an export because an export writes nothing.
+  try {
+    exportGame();
+  } catch {
+    setIoError(EXPORT_MESSAGES.failed);
+  }
+}
+
+// ── action sheet ─────────────────────────────────────────────────────────────
+
+function openSheet(playerId) {
+  const p = store.state().players.find((x) => x.id === playerId);
+  if (!p) return;
+  sheetPlayerId = playerId;
+  $("#sheet-who").textContent = p.name;
+  show($("#sheet"), $("#scrim"));
+}
+
+/** Setup outlives the action sheet, so the scrim goes only once both are shut. */
+function closeSheets() {
+  sheetPlayerId = null;
+  hide($("#sheet"));
+  hideScrimIfClear();
+}
+
+/**
+ * One scrim is shared by four overlays — first-run setup, the action sheet, the Hu
+ * flow and the penalty flow. It is dismissed only when the last of them has gone, so
+ * handing over from one to the next never flashes the table through.
+ */
+function hideScrimIfClear() {
+  if ($("#setup").hidden && $("#sheet").hidden && $("#hu").hidden && $("#penalti").hidden && $("#koin").hidden) hide($("#scrim"));
+}
+
+// ── hu — method → (discarder) → tay → preview → commit ───────────────────────
+
+/** The entry in progress, or null. Nothing is written until Catat. */
+let hu = null;
+
+function huStep(step) {
+  $("#hu").dataset.huStep = step;
+  for (const el of $$("#hu .hu-panel")) el.hidden = el.dataset.huStep !== step;
+}
+
+/** The typed digits as a positive integer, or null while they are not one yet. */
+function huTay() {
+  if (hu.digits === "") return null;
+  const n = Number(hu.digits);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * The event this flow would append, or null while the entry is incomplete.
+ * Built here, priced by settle.js — never the other way round.
+ */
+function huEvent() {
+  const tay = huTay();
+  if (tay === null) return null;
+  const event = { type: "hu", method: hu.method, tay: applyFuFloor(tay), winnerId: hu.winnerId };
+  // A self-draw has no discarder at all; settle.js reads the absence, so the key
+  // is omitted rather than set to null (store.js skips null ids, which would
+  // silently accept a taCung win with nobody to charge).
+  if (!HU_METHODS[hu.method].selfDraw) event.discarderId = hu.discarderId;
+  return event;
+}
+
+/**
+ * The preview line, rendered from what `transfersFor()` returned.
+ *
+ * The totals below are a sum over the engine's own output, not a second copy of
+ * the rule: nothing here knows that a taCung discarder pays double — it reads
+ * the largest share the engine produced and calls it the doubled one. That is
+ * what keeps this string and the committed score from ever disagreeing (C1).
+ */
+function huPreviewText(transfers, method) {
+  const total = transfers.reduce((sum, t) => sum + t.amount, 0);
+  if (method.selfDraw) {
+    return `3 pemain lain bayar 2× (${transfers[0].amount}) · pemenang terima ${total}`;
+  }
+  const amounts = transfers.map((t) => t.amount);
+  return `Ta Cung bayar 2× (${Math.max(...amounts)}) · 2 pemain lain bayar ${Math.min(...amounts)} · pemenang terima ${total}`;
+}
+
+function renderHuMethods() {
+  const box = $("#hu-methods");
+  box.replaceChildren();
+  for (const [key, method] of Object.entries(HU_METHODS)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hu-item";
+    btn.dataset.method = key;
+    const label = document.createElement("span");
+    label.textContent = method.label;
+    const cite = document.createElement("span");
+    cite.className = "cite";
+    cite.textContent = method.cite;
+    btn.append(label, cite);
+    btn.addEventListener("click", () => pickHuMethod(key));
+    box.append(btn);
+  }
+}
+
+/** The three players who are not the winner. A winner cannot discard to himself. */
+function renderHuDiscarders() {
+  const box = $("#hu-discarders");
+  box.replaceChildren();
+  for (const p of store.state().players) {
+    if (p.id === hu.winnerId) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hu-item";
+    btn.dataset.discarder = p.id;
+    const label = document.createElement("span");
+    label.textContent = p.name;
+    const cite = document.createElement("span");
+    cite.className = "cite";
+    cite.textContent = SEAT_LABEL[p.seat];
+    btn.append(label, cite);
+    btn.addEventListener("click", () => {
+      hu.discarderId = p.id;
+      huStep("tay");
+      renderHuTay();
+    });
+    box.append(btn);
+  }
+}
+
+function pickHuMethod(key) {
+  hu.method = key;
+  if (HU_METHODS[key].selfDraw) {
+    huStep("tay");
+    return renderHuTay();
+  }
+  renderHuDiscarders();
+  huStep("buang");
+}
+
+function renderHuTay() {
+  // A null flow renders the empty panel rather than throwing. `closeHu()` empties the
+  // panel as the flow ends and has no flow to hand over, and a renderer that can only
+  // be called with a live flow is one refactor away from the crash this file already
+  // carries a guard for in `commitHu`.
+  const method = hu ? HU_METHODS[hu.method] : null;
+
+  // A fresh flow renders before any method is picked, and `openHu` calls this so the
+  // panel never holds the previous hand's numbers. They would be hidden at that point
+  // — the tay panel is not the visible one — but a hidden panel carrying a stale tay
+  // and its stale preview is one navigation away from being shown, and it reads as if
+  // the player had already typed something.
+  if (!method) {
+    $("#hu-tay").textContent = "—";
+    $("#hu-metode").textContent = "";
+    $("#hu-preview").textContent = "";
+    $("#hu-reminder").textContent = "";
+    $("#hu-floor").hidden = true;
+    $("#hu-error").hidden = true;
+    $("#hu-commit").disabled = true;
+    return;
+  }
+
+  const tay = huTay();
+  $("#hu-tay").textContent = hu.digits === "" ? "—" : hu.digits;
+
+  // YDSP P8/P9. Written here, beside the number it changes, because these two rows
+  // are the ones the app cannot apply itself — it never sees the tiles, so it can
+  // neither detect the ciok nor adjust the tay. The player reads the rule and types
+  // the corrected number; the number pad is the whole mechanism.
+  $("#hu-reminder").textContent = `${PING_FU_REMINDER} (${PING_FU_CITE})`;
+
+  // The tay step names what is being recorded. The preview cannot do this job for
+  // the five self-draw methods: they collapse to one identical string, so without
+  // this line a tap on Thien Fu looks exactly like a tap on Pyong Pi and the
+  // player has nothing to confirm the method registered. Rendered from
+  // HU_METHODS like every other label, never restated here.
+  let metode = method.label;
+  if (!method.selfDraw) {
+    const discarder = store.state().players.find((p) => p.id === hu.discarderId);
+    if (discarder) metode += ` — ${discarder.name} buang`;
+  }
+  $("#hu-metode").textContent = metode;
+
+  // Empty is an invitation, not a failure (SPEC.md rule 7) — nothing is shown
+  // until something has been typed, and the message is for a typed non-positive.
+  const err = hu.digits !== "" && tay === null ? "Masukkan angka lebih dari 0." : null;
+  const errEl = $("#hu-error");
+  errEl.hidden = !err;
+  errEl.textContent = err ?? "";
+
+  const floorEl = $("#hu-floor");
+  let preview = "";
+  if (tay !== null) {
+    const event = huEvent();
+    preview = huPreviewText(transfersFor(event, store.state().players), HU_METHODS[hu.method]);
+    const floored = applyFuFloor(tay) !== tay;
+    floorEl.hidden = !floored;
+    if (floored) {
+      // The numbers and the citation come from rules.js, so this sentence cannot
+      // drift away from the floor it is describing.
+      floorEl.textContent =
+        `Fu kurang dari ${MIN_FU_TAY} — diselesaikan sebagai ${FU_FLOOR_TAY} tay (${FU_FLOOR_CITE})`;
+    }
+  } else {
+    floorEl.hidden = true;
+  }
+  $("#hu-preview").textContent = preview;
+  $("#hu-commit").disabled = tay === null;
+}
+
+function pressHuKey(key) {
+  if (key === "back") {
+    hu.digits = hu.digits.slice(0, -1);
+  } else if (hu.digits.length < MAX_TAY_DIGITS) {
+    // Leading zeros are stripped as they are typed, so `0` then `1` reads `1`,
+    // and a lone `0` stays `0` so the error message has something to name.
+    hu.digits = (hu.digits + key).replace(/^0+(?=\d)/, "");
+  }
+  renderHuTay();
+}
+
+function openHu(winnerId) {
+  const p = store.state().players.find((x) => x.id === winnerId);
+  if (!p) return closeSheets();
+  hu = { winnerId, method: null, discarderId: null, digits: "" };
+  $("#hu-who").textContent = p.name;
+  renderHuMethods();
+  // Both of the flow's other panels were emptied by `closeHu()`, so there is nothing
+  // to clear here — the discarder list is built at the taCung pick, and the tay panel
+  // was reset on the way out of the last flow.
+  closeSheets(); // the action sheet hands over — never two scrims, never two dialogs
+  huStep("metode");
+  show($("#hu"), $("#scrim"));
+}
+
+function closeHu() {
+  hu = null;
+  // A closed dialog keeps nothing. The tay panel and the discarder list are emptied
+  // as the flow ends, not when the next one opens — both are `hidden` at this point,
+  // which is exactly why it has to be explicit: an unseen field still holding the last
+  // hand's number reads as a pre-filled answer the moment anything navigates back to
+  // it. Every exit runs through here — commit, Escape, scrim, Batal — so this is the
+  // one place the reset belongs.
+  renderHuTay();
+  $("#hu-discarders").replaceChildren();
+  hide($("#hu"));
+  hideScrimIfClear();
+}
+
+function commitHu() {
+  // Reachable with `hu` already null: `HTMLElement.click()` fires the handler whatever
+  // the element's visibility, so a second activation of Catat — a stray script call, or
+  // a keyboard path added later — runs this with no flow in progress. `pressHuKey` has
+  // carried the same guard all along; the commit path is the one place it matters most,
+  // since the next line writes to a log nothing can be removed from.
+  if (!hu) return;
+  const event = huEvent();
+  if (!event) return;
+  try {
+    store.append(event);
+  } catch (e) {
+    // Stay open and say so. An append that threw recorded nothing, so closing
+    // here would read as success and lose the hand silently.
+    const errEl = $("#hu-error");
+    errEl.hidden = false;
+    errEl.textContent = e.message;
+    return;
+  }
+  closeHu();
+  setView("meja");
+  render();
+}
+
+// ── penalti — pick a YDSP row, then Catat ────────────────────────────────────
+//
+// Every row v1 offers is a Lew Fit, which moves no points, so this flow has no
+// number pad and no preview: `settle.js` prices it at zero and the row itself is
+// the whole record. The rows that *do* move points are already priced elsewhere —
+// see `PENALTY_EXCLUDED` for which, and why — so a pad here would be a second way
+// to charge a player for the same thing.
+
+/** The row picked in the open flow, or null. */
+let penalti = null;
+
+function penaltiEvent() {
+  if (!penalti) return null;
+  return { type: "penalty", kind: penalti.kind, row: penalti.row, offenderId: penalti.offenderId };
+}
+
+function renderPenaltiRows() {
+  const box = $("#penalti-rows");
+  box.replaceChildren();
+  for (const row of PENALTY_ROWS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hu-item";
+    btn.dataset.penaltiRow = String(row.no);
+    btn.setAttribute("aria-pressed", String(penalti?.row === row.no));
+    const label = document.createElement("span");
+    label.textContent = row.name;
+    const cite = document.createElement("span");
+    cite.className = "cite";
+    cite.textContent = `YDSP P${row.no}`;
+    btn.append(label, cite);
+    // The consequence text sits under the name rather than in a second list, so the
+    // row and what it costs cannot be read apart from each other.
+    const desc = document.createElement("span");
+    desc.className = "hu-item-desc";
+    desc.textContent = row.desc;
+    btn.append(desc);
+    btn.addEventListener("click", () => pickPenaltiRow(row));
+    box.append(btn);
+  }
+}
+
+function pickPenaltiRow(row) {
+  penalti = { offenderId: penalti.offenderId, row: row.no, kind: row.kind };
+  for (const b of $$("#penalti-rows [data-penalti-row]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.penaltiRow === String(row.no)));
+  }
+  $("#penalti-commit").disabled = false;
+}
+
+function setPenaltiError(msg) {
+  const el = $("#penalti-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+function openPenalti(offenderId) {
+  const p = store.state().players.find((x) => x.id === offenderId);
+  if (!p) return closeSheets();
+  penalti = { offenderId, row: null, kind: null };
+  $("#penalti-who").textContent = p.name;
+  setPenaltiError(null);
+  // A row is a real choice with a consequence, so Catat starts disabled and the
+  // flow cannot commit by itself. Same shape as the Hu flow's.
+  $("#penalti-commit").disabled = true;
+  renderPenaltiRows();
+  closeSheets(); // the action sheet hands over — never two scrims, never two dialogs
+  show($("#penalti"), $("#scrim"));
+}
+
+function closePenalti() {
+  penalti = null;
+  // Emptied on the way out, like the Hu flow: every exit runs through here, so this
+  // is the one place the reset belongs, and a closed dialog keeps nothing.
+  $("#penalti-rows").replaceChildren();
+  setPenaltiError(null);
+  hide($("#penalti"));
+  hideScrimIfClear();
+}
+
+function commitPenalti() {
+  // Guarded for the same reason `commitHu` is: `HTMLElement.click()` fires the
+  // handler whatever the element's visibility, so a stray or keyboard activation
+  // reaches this with no flow in progress — and this path writes to a log nothing
+  // can be removed from.
+  if (!penalti) return;
+  const event = penaltiEvent();
+  if (!event) return;
+  try {
+    store.append(event);
+  } catch (e) {
+    // Stay open and say so. An append that threw recorded nothing, so closing here
+    // would read as success and lose the penalty silently.
+    return setPenaltiError(e.message);
+  }
+  closePenalti();
+  setView("meja");
+  render();
+}
+
+// ── koin — pick a combination, then Catat ────────────────────────────────────
+//
+// Kong and flowers are paid in coins at the table and never enter tay, which is
+// why this is a fourth flow rather than a line on the Hu sheet. The collector is
+// the seat that was tapped (SPEC.md rule 3), so there is no "who collects?" step.
+//
+// No citation on these rows, unlike the Hu methods and the penalty rows: YDSP has
+// no numbered row for koin — DECISIONS.md records the booklet's own game-flow
+// module as the source — and printing an internal filename in a player-facing
+// sheet is provenance theatre. The right-hand slot carries the amount instead,
+// which is what the tap is for.
+
+/** The combination picked in the open flow, or null. */
+let koin = null;
+
+function koinEvent() {
+  if (!koin) return null;
+  return { type: "koin", kind: koin.kind, collectorId: koin.collectorId };
+}
+
+function renderKoinRows() {
+  const box = $("#koin-rows");
+  box.replaceChildren();
+  for (const [kind, row] of Object.entries(KOIN)) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "hu-item";
+    btn.dataset.koinKind = kind;
+    btn.setAttribute("aria-pressed", String(koin?.kind === kind));
+    const label = document.createElement("span");
+    label.textContent = row.label;
+    const amount = document.createElement("span");
+    amount.className = "koin-amount";
+    amount.textContent = `${row.amount} koin`;
+    btn.append(label, amount);
+    btn.addEventListener("click", () => pickKoinRow(kind));
+    box.append(btn);
+  }
+}
+
+function pickKoinRow(kind) {
+  koin = { collectorId: koin.collectorId, kind };
+  for (const b of $$("#koin-rows [data-koin-kind]")) {
+    b.setAttribute("aria-pressed", String(b.dataset.koinKind === kind));
+  }
+  $("#koin-commit").disabled = false;
+}
+
+function setKoinError(msg) {
+  const el = $("#koin-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+function openKoin(collectorId) {
+  const p = store.state().players.find((x) => x.id === collectorId);
+  if (!p) return closeSheets();
+  koin = { collectorId, kind: null };
+  $("#koin-who").textContent = p.name;
+  setKoinError(null);
+  $("#koin-commit").disabled = true;
+  renderKoinRows();
+  closeSheets(); // the action sheet hands over — never two scrims, never two dialogs
+  show($("#koin"), $("#scrim"));
+}
+
+function closeKoin() {
+  koin = null;
+  // Emptied on the way out, like the other two flows: every exit runs through here,
+  // so this is the one place the reset belongs, and a closed dialog keeps nothing.
+  $("#koin-rows").replaceChildren();
+  setKoinError(null);
+  hide($("#koin"));
+  hideScrimIfClear();
+}
+
+function commitKoin() {
+  // Guarded for the same reason `commitHu` and `commitPenalti` are: `HTMLElement.click()`
+  // fires the handler whatever the element's visibility, and this path writes to a log
+  // nothing can be removed from.
+  if (!koin) return;
+  const event = koinEvent();
+  if (!event) return;
+  try {
+    store.append(event);
+  } catch (e) {
+    // Stay open and say so. An append that threw recorded nothing, so closing here
+    // would read as success and lose the koin silently.
+    return setKoinError(e.message);
+  }
+  closeKoin();
+  setView("meja");
+  render();
+}
+
+// ── wiring ───────────────────────────────────────────────────────────────────
+
+function wire() {
+  for (const b of $$(".tabbar button")) {
+    b.addEventListener("click", () => setView(b.dataset.goto));
+  }
+
+  // A seat is the tap target, and it carries the id it was rendered for.
+  for (const el of $$(".seat")) {
+    el.addEventListener("click", () => openSheet(el.dataset.player));
+  }
+
+  for (const b of $$("#sheet [data-action]")) {
+    b.addEventListener("click", () => {
+      if (b.dataset.action === "hu") return openHu(sheetPlayerId);
+      if (b.dataset.action === "penalti") return openPenalti(sheetPlayerId);
+      if (b.dataset.action === "koin") return openKoin(sheetPlayerId);
+      closeSheets();
+    });
+  }
+
+  // Delegated, so eleven keys need one listener rather than eleven.
+  $("#hu-keypad").addEventListener("click", (e) => {
+    const key = e.target.closest("[data-key]");
+    if (key && hu) pressHuKey(key.dataset.key);
+  });
+  $("#hu-commit").addEventListener("click", commitHu);
+  for (const b of $$("[data-hu-cancel]")) b.addEventListener("click", closeHu);
+
+  $("#penalti-commit").addEventListener("click", commitPenalti);
+  for (const b of $$("[data-penalti-cancel]")) b.addEventListener("click", closePenalti);
+
+  $("#koin-commit").addEventListener("click", commitKoin);
+  for (const b of $$("[data-koin-cancel]")) b.addEventListener("click", closeKoin);
+
+  $("#scrim").addEventListener("click", () => {
+    if (hu) return closeHu();
+    if (penalti) return closePenalti();
+    if (koin) return closeKoin();
+    closeSheets();
+  });
+  $("#btn-setup").addEventListener("click", openSetup);
+  $("#setup-form").addEventListener("submit", submitSetup);
+  $("#utang-form").addEventListener("submit", submitUtang);
+
+  $("#io-export").addEventListener("click", doExport);
+  $("#io-import").addEventListener("click", () => {
+    // #io-import is a plain button, not the file input: the input is the hidden
+    // one `chooseImportFile` reads, and it is re-clicked through here so the whole
+    // block stays one row of two same-sized buttons on a phone.
+    setIoError(null);
+    closeIoConfirm();
+    $("#io-file").click();
+  });
+  $("#io-file").addEventListener("change", chooseImportFile);
+  $("#io-ya").addEventListener("click", confirmImport);
+  $("#io-batal").addEventListener("click", closeIoConfirm);
+
+  // A refusal explains the state the form was in when it was refused, so it stops
+  // being true the moment the player edits the form — measured: after "Peminjam dan
+  // pemberi harus pemain yang berbeda" the message was still up while a new amount
+  // was being typed, describing a state already left behind. Delegated, so every
+  // field clears it without the setter having to be wired per input.
+  for (const [form, clear] of [
+    [$("#setup-form"), () => setSetupError(null)],
+    [$("#utang-form"), () => setUtangError(null)],
+  ]) {
+    form.addEventListener("input", clear);
+    form.addEventListener("change", clear);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    // Escape closes the sheets you can back out of. It must NOT close first-run
+    // setup: there is no table behind it until four players exist.
+    if (e.key !== "Escape") return;
+    if (hu) return closeHu();
+    if (penalti) return closePenalti();
+    if (koin) return closeKoin();
+    if (!$("#sheet").hidden) closeSheets();
+  });
+}
+
+function init() {
+  wire();
+  render();
+  // First run, or a table that never finished setup. The sheet sits over `meja`,
+  // so the diamond is visible behind it as the thing being configured.
+  if (store.state().players.length !== SEATS.length) openSetup();
+}
+
+// A module script is deferred, so DOMContentLoaded may already have fired.
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", init);
+} else {
+  init();
+}

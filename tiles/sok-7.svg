@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 129">
+<rect x="2" y="2" width="92" height="125" rx="9" fill="#ffffff" stroke="#1a1a1a" stroke-width="1.6"/>
+<rect x="21.75" y="23.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="23.25" y1="33.5" x2="30.75" y2="33.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="43.5" x2="30.75" y2="43.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="53.5" x2="30.75" y2="53.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="63.75" y="23.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="65.25" y1="33.5" x2="72.75" y2="33.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="43.5" x2="72.75" y2="43.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="53.5" x2="72.75" y2="53.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="42.75" y="23.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="44.25" y1="33.5" x2="51.75" y2="33.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="44.25" y1="43.5" x2="51.75" y2="43.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="44.25" y1="53.5" x2="51.75" y2="53.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="21.75" y="44.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="23.25" y1="54.5" x2="30.75" y2="54.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="64.5" x2="30.75" y2="64.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="74.5" x2="30.75" y2="74.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="63.75" y="44.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="65.25" y1="54.5" x2="72.75" y2="54.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="64.5" x2="72.75" y2="64.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="74.5" x2="72.75" y2="74.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="21.75" y="65.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="23.25" y1="75.5" x2="30.75" y2="75.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="85.5" x2="30.75" y2="85.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="23.25" y1="95.5" x2="30.75" y2="95.5" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="63.75" y="65.5" width="10.5" height="40" rx="5.25" fill="#4d6b24" stroke="#36531a" stroke-width="1"/>
+<line x1="65.25" y1="75.5" x2="72.75" y2="75.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="85.5" x2="72.75" y2="85.5" stroke="#ffffff" stroke-width="1.2"/>
+<line x1="65.25" y1="95.5" x2="72.75" y2="95.5" stroke="#ffffff" stroke-width="1.2"/>
+</svg>

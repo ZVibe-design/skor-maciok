@@ -1,0 +1,710 @@
+/* P3 scoring app — mobile-first at 390x844, one hand, at a table, under a lamp.
+   This file is the permanent record of the SPEC.md tokens. */
+
+:root {
+  color-scheme: dark;
+
+  /* Pinned by SPEC.md — do not re-derive these six. */
+  --meja: #12312A;      /* table ground */
+  --tile: #E8E3D6;      /* bone surface */
+  --tinta: #1A1A18;     /* ink, for text on bone */
+  --cinnabar: #C4372B;  /* primary action + anomaly only */
+  --jade: #2A6B4F;      /* confirmation, sparingly */
+  --kim: #D9B65C;       /* Σ plaque numerals only */
+
+  /* Derived from the six above — bevel edges, the plaque's darker ground. */
+  --bevel-terang: #F7F3E8;
+  --bevel-gelap: #C3B9A3;
+  --plaque: #0B211C;
+  --panel: #0F2A24;
+  --garis: rgba(232, 227, 214, .16);
+  --redup: rgba(232, 227, 214, .55);
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px calc(64px + env(safe-area-inset-bottom, 0px));
+  background: var(--meja);
+  color: var(--tile);
+  /* System stack only. The SW precache list is fixed, and a webfont would break
+     the app offline — which is the whole point of it. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Scores must never jitter as digits change. */
+  font-variant-numeric: tabular-nums;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+:focus-visible { outline: 2px solid var(--tile); outline-offset: 2px; }
+
+main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.view { display: none; flex: 1; flex-direction: column; min-height: 0; }
+body[data-view="meja"] #view-meja,
+body[data-view="skor"] #view-skor,
+body[data-view="utang"] #view-utang,
+body[data-view="selesai"] #view-selesai { display: flex; }
+
+.banner {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: var(--cinnabar);
+  color: var(--tile);
+  border-radius: 4px;
+  font-size: .82rem;
+}
+
+.empty {
+  margin: auto;
+  padding: 24px 8px;
+  text-align: center;
+  color: rgba(232, 227, 214, .45);
+  font-size: .9rem;
+}
+
+/* ── meja ──────────────────────────────────────────────────────────────────── */
+
+.meja-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.meja-label { font-size: .95rem; color: rgba(232, 227, 214, .75); }
+
+.link-btn {
+  min-height: 44px;
+  padding: 10px 4px;
+  background: none;
+  border: 0;
+  color: var(--redup);
+  font: inherit;
+  font-size: .8rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* The diamond. Three equal columns AND three equal rows over an aspect-ratio:1
+   container is what makes all nine cells identical squares — the four seats and
+   the plaque included. No size is ever set on a seat: a seat larger than its
+   neighbours implies a rank the table does not have. */
+.table {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  grid-template-areas:
+    ".  n  ."
+    "w  c  e"
+    ".  s  .";
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+  aspect-ratio: 1 / 1;
+}
+
+.seat[data-seat="pei"]  { grid-area: n; }  /* Pei is north on screen */
+.seat[data-seat="si"]   { grid-area: w; }
+.seat[data-seat="tung"] { grid-area: e; }
+.seat[data-seat="nan"]  { grid-area: s; }
+.plaque { grid-area: c; }
+
+/* A seat is a tile, not a card: a two-tone bevel (lit edge, shaded edge) rather
+   than a soft shadow, and it presses by swapping the two. */
+.seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 4px;
+  background: var(--tile);
+  color: var(--tinta);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  border: 2px solid;
+  border-color: var(--bevel-terang) var(--bevel-gelap) var(--bevel-gelap) var(--bevel-terang);
+  border-radius: 3px;
+}
+
+.seat:active {
+  transform: translateY(1px);
+  border-color: var(--bevel-gelap) var(--bevel-terang) var(--bevel-terang) var(--bevel-gelap);
+}
+
+.seat:disabled { opacity: .5; cursor: default; }
+
+.seat-id { display: flex; align-items: center; gap: 3px; line-height: 1; }
+
+/* N/E/S/W — English initials are a deliberate single exception to the
+   Indonesian-only rule, pinned in SPEC.md rule 2. U/T/S/B is NOT a correction:
+   YDSP row 16 scores seat position and round wind separately, so the letter and
+   the wind tile are two facts, not a duplicate. */
+.kompas { font-size: .62rem; opacity: .55; letter-spacing: .02em; }
+
+.tile { display: block; width: 22px; height: auto; max-width: 100%; }
+
+.seat-nama {
+  max-width: 100%;
+  font-size: .8rem;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seat-skor { font-size: 1.05rem; font-weight: 800; line-height: 1.1; }
+
+/* The one bold element. Gold here and nowhere else, because net-zero is the
+   whole promise the app makes. */
+.plaque {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--plaque);
+  color: var(--kim);
+  border: 1px solid rgba(217, 182, 92, .25);
+  border-radius: 3px;
+}
+
+.sigma { font-size: .8rem; letter-spacing: .04em; }
+.sigma .total { font-size: 1.3rem; font-weight: 800; }
+
+/* Σ ≠ n × start is a bug indicator, not a style choice. */
+.plaque[data-anomali="true"] {
+  background: var(--cinnabar);
+  color: var(--tile);
+  border-color: rgba(232, 227, 214, .3);
+  animation: deny 600ms ease-out 1;
+}
+
+@keyframes deny {
+  0%   { transform: scale(1); }
+  45%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plaque[data-anomali="true"],
+  .skor-total[data-anomali="true"] { animation: none; }
+}
+
+/* ── pasang — the install hint under the table ─────────────────────────────── */
+
+.pasang {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(232, 227, 214, .06);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+}
+
+.pasang-judul {
+  margin: 0 0 4px;
+  font-size: .78rem;
+  color: rgba(232, 227, 214, .7);
+}
+
+.pasang-baris { margin: 0; font-size: .82rem; color: var(--redup); line-height: 1.5; }
+
+/* The reason, set apart from the two instructions because it is not one: it is
+   what the two lines above buy. */
+.pasang-alasan { margin-top: 4px; color: rgba(232, 227, 214, .45); }
+
+/* Installed is exactly the state this hint is for, so it goes away on its own —
+   no flag, no localStorage, and nothing for the player to dismiss. `display: none`
+   rather than the `hidden` attribute so that the markup carries no state that
+   could disagree with the display mode. */
+@media (display-mode: standalone) {
+  .pasang { display: none; }
+}
+
+/* ── skor ──────────────────────────────────────────────────────────────────── */
+
+/* The same treatment as `.hu-label` in the sheets, and deliberately so: the sheets
+   and this view are one system. It is not reused by name because a class called
+   `hu-` on the scoreboard would be a lie about where it belongs. */
+.skor-label { margin: 0; font-size: .78rem; color: rgba(232, 227, 214, .7); }
+
+.papan {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.papan-baris {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: rgba(232, 227, 214, .06);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+}
+
+.papan-nama {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .9rem;
+}
+
+/* The same size and weight as `.seat-skor`, so the board and the diamond agree
+   about what the headline number looks like. */
+.papan-skor { font-size: 1.05rem; font-weight: 800; }
+
+/* Quieter than the score on purpose: this is the delta beside it, and the explicit
+   sign is what makes it legible without a second colour — SPEC.md pins the palette
+   to six tokens and none of them means "gain" or "loss". */
+.papan-net { min-width: 3.4em; text-align: right; font-size: .9rem; color: var(--redup); }
+
+.riwayat-wrap { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; }
+
+.riwayat {
+  display: grid;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.riwayat-baris {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+}
+
+.riwayat-seq { font-size: .72rem; color: var(--redup); }
+.riwayat-isi { min-width: 0; font-size: .82rem; line-height: 1.25; }
+.riwayat-delta { min-width: 3em; text-align: right; font-size: .85rem; font-weight: 800; }
+
+/* SPEC.md rule 1 — 44px, everywhere. */
+.riwayat-aksi {
+  min-height: 44px;
+  padding: 6px 10px;
+  background: none;
+  color: var(--redup);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+}
+
+.riwayat-aksi:active { border-color: var(--bevel-terang); }
+
+/* A cancelled row is not a deleted one. It keeps its own numbers, struck through,
+   so the reader can see what the undo took off — which is the whole reason undo is
+   a `koreksi` and not a splice (SPEC.md rule 6). Only the row is struck: the koreksi
+   that did it is the live one and reads normally. */
+.riwayat-baris[data-nonaktif="true"] .riwayat-isi,
+.riwayat-baris[data-nonaktif="true"] .riwayat-delta {
+  color: rgba(232, 227, 214, .4);
+  text-decoration: line-through;
+}
+
+/* `Σ <total> / <n × start>`. Read from the plaque's ground and NOT its gold —
+   SPEC.md pins --kim to the meja plaque numerals and calls it the only gold in the
+   app, so a second gold band here would break the one-bold-element rule. The
+   anomaly state takes the plaque's cinnabar treatment exactly, so the two bug
+   indicators read as one system. */
+.skor-total {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  text-align: center;
+  background: var(--plaque);
+  color: var(--redup);
+  border: 1px solid var(--garis);
+  border-radius: 3px;
+  font-size: .82rem;
+  letter-spacing: .04em;
+}
+
+.skor-total .angka { color: var(--tile); font-size: 1rem; font-weight: 800; }
+
+.skor-total[data-anomali="true"] {
+  background: var(--cinnabar);
+  color: var(--tile);
+  border-color: rgba(232, 227, 214, .3);
+  animation: deny 600ms ease-out 1;
+}
+
+.skor-total[data-anomali="true"] .angka { color: var(--tile); }
+
+/* ── utang ─────────────────────────────────────────────────────────────────── */
+
+/* Slimmer than `.papan`: these rows carry no tile and no headline number, only a
+   name and two small totals, and the screen has a ledger and a form under them.
+   The 22px tile the board uses would push the list it belongs beside off screen. */
+.utang-papan { margin-bottom: 0; gap: 4px; }
+
+.utang-papan .utang-baris {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 8px;
+  background: rgba(232, 227, 214, .06);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+}
+
+.utang-nama {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .85rem;
+}
+
+/* The plan's own template — `Tung meminjam 200 · Pei meminjamkan 200` — for one
+   player: both clauses, so a player who has neither borrowed nor lent says so
+   instead of being absent from the list. Right-aligned in a tabular font, so the
+   four rows read as a column of figures. */
+.utang-angka { text-align: right; font-size: .8rem; color: var(--redup); }
+
+/* Task 10 step 3. Not `.error` — this is a statement about the app's arithmetic,
+   not a failure, and cinnabar is reserved for the primary action and anomalies. */
+.utang-catatan {
+  margin: 8px 0 10px;
+  font-size: .78rem;
+  line-height: 1.3;
+  color: var(--redup);
+}
+
+.utang-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+
+/* Two fields per row: the pair of players, then the amount beside the note. Keeps
+   the form to three rows on a 390px screen, which is what leaves the ledger a
+   usable height above it. */
+.utang-baris { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; }
+
+/* The note under the event text, not beside it: it is the player's own words about
+   the row above and reads as a continuation of it. */
+.utang-note { display: block; font-size: .75rem; color: var(--redup); }
+
+/* Three columns, not the history's four: a loan has no delta to show in the slot
+   the scoreboard uses for one. The amount is already in the sentence, and a second
+   copy of it in a column would be a number that could disagree with the first. */
+#utang-riwayat .riwayat-baris { grid-template-columns: auto 1fr auto; }
+
+/* ── selesai — hasil, utang, transfer akhir ────────────────────────────────── */
+
+/* The three block headings are the screen's whole structure: each one names the
+   question the rows under it answer. Closer to its own list than to the block above,
+   so the grouping is legible without a divider. */
+.selesai-label { margin: 12px 0 4px; font-size: .78rem; color: rgba(232, 227, 214, .7); }
+
+/* Three columns, not the four `.papan-baris` carries: a settlement row names a player
+   and gives two numbers about them, and shows no seat tile — the diamond on `meja` is
+   where a seat is read, and repeating it here would be a second copy of the table. */
+#selesai-hasil .papan-baris { grid-template-columns: 1fr auto auto; }
+
+/* `.empty` centres itself with `margin: auto`, which inside this column flexes the
+   rest of the screen apart. "Tidak ada pinjaman." is a statement in the flow of the
+   Utang block, not a placeholder standing in for a list that failed to render. */
+.selesai-kosong { margin: 0 0 10px; padding: 0; text-align: left; font-size: .82rem; }
+
+/* One payment per row, in the sentence that states it: who pays, who receives, how
+   much. Weight 800 because this is the number the table acts on — it is the heaviest
+   type on the screen after the Σ plaque, which is deliberate. */
+.selesai-transfer { display: grid; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
+
+.transfer-baris {
+  padding: 8px 10px;
+  background: rgba(232, 227, 214, .06);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  font-size: .95rem;
+  font-weight: 800;
+}
+
+/* The count and the bound it never exceeds. Quieter than the rows above, because it
+   is a statement about the list rather than a payment in it. */
+.selesai-ringkas { margin: 0; font-size: .8rem; color: var(--redup); }
+.selesai-ringkas .angka { color: var(--tile); font-weight: 800; }
+
+/* ── nav ───────────────────────────────────────────────────────────────────── */
+.tabbar {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--panel);
+  border-top: 1px solid var(--garis);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.tabbar button {
+  min-height: 48px;
+  background: none;
+  border: 0;
+  border-top: 2px solid transparent;
+  color: var(--redup);
+  font: inherit;
+  font-size: .8rem;
+  cursor: pointer;
+}
+
+.tabbar button[aria-current="true"] { color: var(--tile); border-top-color: var(--tile); }
+
+/* ── sheets ────────────────────────────────────────────────────────────────── */
+
+.scrim { position: fixed; inset: 0; z-index: 10; background: rgba(6, 18, 15, .6); }
+
+.sheet {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  background: var(--panel);
+  border-top: 1px solid var(--garis);
+  border-radius: 14px 14px 0 0;
+}
+
+.sheet-who { margin: 0 0 4px; font-size: .9rem; color: rgba(232, 227, 214, .7); }
+
+.sheet-btn {
+  min-height: 48px;
+  padding: 10px 12px;
+  background: rgba(232, 227, 214, .06);
+  color: var(--tile);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.sheet-btn.utama { background: var(--cinnabar); border-color: transparent; font-weight: 800; }
+.sheet-btn.batal { background: none; color: var(--redup); }
+
+.sheet-setup h2 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; }
+
+.peserta {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+/* One label treatment and one field treatment for every form in the app — the
+   setup sheet and the utang view alike. `.utang-field` is listed here rather than
+   given a copy of these rules: a second 9-line block is a second thing to keep in
+   sync, and the 44px floor is a SPEC rule that must not drift between screens. */
+.peserta label,
+.modal-awal,
+.utang-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: .78rem;
+  color: rgba(232, 227, 214, .7);
+}
+
+.peserta input,
+.peserta select,
+.modal-awal input,
+.utang-form input,
+.utang-form select {
+  min-height: 44px;
+  padding: 8px 10px;
+  background: rgba(232, 227, 214, .08);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  color: var(--tile);
+  font: inherit;
+  font-size: 1rem; /* 1rem, not smaller: iOS zooms the page under 16px */
+}
+
+.hint { font-size: .72rem; color: rgba(232, 227, 214, .5); }
+
+/* ── arsip — export / import, inside the setup sheet ───────────────────────── */
+
+/* A rule above it, because it is not part of the form: the four names, the seats
+   and Modal awal are one thing (this table), and the archive is another (the
+   record of it). Without the divider the Impor button reads as a third way to
+   save the form above it. */
+.arsip {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--garis);
+}
+
+.arsip-judul { margin: 0 0 4px; font-size: .78rem; color: rgba(232, 227, 214, .7); }
+
+.arsip-catatan { margin: 0 0 8px; font-size: .82rem; color: var(--redup); line-height: 1.5; }
+
+/* Two 44px targets side by side, each taking half the sheet. `.link-btn` already
+   carries the SPEC floor and the underline treatment; this only lays them out. */
+.arsip-tombol { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+
+.arsip-tombol .link-btn {
+  padding: 10px 8px;
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--tile);
+}
+
+/* The error sits under the buttons it belongs to, and the archive block is the
+   last thing in the sheet, so the extra top margin is what keeps it from reading
+   as an error about the whole form. */
+.arsip .error { margin-top: 8px; }
+
+/* The confirm replaces the two buttons rather than sitting under them: while it is
+   open, "Ekspor" is not what the player is deciding about. */
+.arsip-konfirmasi {
+  margin-top: 8px;
+  padding: 10px;
+  background: rgba(196, 55, 43, .12);
+  border: 1px solid rgba(196, 55, 43, .45);
+  border-radius: 4px;
+}
+
+/* Not `.error` — this is a question, not a failure, and it would read as one if it
+   wore the same red block. The border above carries the weight instead. */
+.arsip-tanya { margin: 0 0 8px; font-size: .85rem; line-height: 1.5; }
+
+.error {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--cinnabar);
+  color: var(--tile);
+  border-radius: 4px;
+  font-size: .85rem;
+}
+
+/* ── hu flow ───────────────────────────────────────────────────────────────── */
+
+.sheet-hu h2 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; }
+
+.hu-panel { display: flex; flex-direction: column; gap: 8px; }
+
+.hu-label { margin: 0; font-size: .78rem; color: rgba(232, 227, 214, .7); }
+
+.hu-list { display: grid; gap: 6px; }
+
+/* A method is one tap target carrying its label and its YDSP citation. The
+   citation is set small and quiet — it is provenance, not the choice. */
+.hu-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px;
+  background: rgba(232, 227, 214, .06);
+  color: var(--tile);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hu-item:active { border-color: var(--bevel-terang); }
+
+.hu-item .cite { font-size: .68rem; color: var(--redup); white-space: nowrap; }
+
+/* A penalty row carries its consequence under its name, because a penalty is
+   chosen for what it costs and the two must not be readable apart. `flex-wrap`
+   on the button lets this take the full width under the label + citation line. */
+.sheet-penalti .hu-item { flex-wrap: wrap; }
+.hu-item-desc { flex-basis: 100%; font-size: .74rem; color: rgba(232, 227, 214, .65); }
+
+/* The chosen row. Selection is carried by `aria-pressed` rather than a class, so
+   the styling and the accessibility state cannot disagree about which row is
+   picked — there is exactly one source for it.
+   Not `--kim`: SPEC.md pins that gold to the Σ plaque numerals and calls it the
+   only gold in the app. This is `--bevel-terang`, the same token `:active` uses,
+   so a held selection reads as the pressed state staying pressed. */
+.hu-item[aria-pressed="true"] {
+  border-color: var(--bevel-terang);
+  background: rgba(232, 227, 214, .12);
+}
+
+.hu-metode { margin: 0; font-size: .85rem; color: rgba(232, 227, 214, .7); }
+
+/* The koin amount. Same slot as `.cite`, but not styled like one: a citation is
+   provenance you read once, and this is the number the tap is *for*. Bone rather
+   than reduced, and one step up in size, since it is the thing being chosen. */
+.koin-amount { font-size: .95rem; font-weight: 800; white-space: nowrap; }
+
+.hu-tay { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.hu-tay-num { font-size: 2rem; font-weight: 800; line-height: 1; }
+.hu-tay-unit { font-size: .8rem; color: var(--redup); }
+
+/* The live preview. It renders what `transfersFor()` returned — it is not a
+   second copy of the arithmetic, and it must never become one (C1). */
+.hu-preview { margin: 0; min-height: 1.2em; font-size: .9rem; }
+
+/* The P7 floor notice. Deliberately NOT --kim: SPEC.md reserves gold for the Σ
+   numerals, and this line is a note, not the app's one bold element. */
+.hu-floor { margin: 0; font-size: .78rem; color: var(--redup); }
+
+/* The YDSP P8/P9 reminder. Same visual weight as the floor notice and a step
+   quieter than the preview above it: it is a rule to read before typing, not a
+   reaction to what was typed. Always present, so it gets no colour of its own. */
+.hu-reminder { margin: 0; font-size: .72rem; line-height: 1.35; color: var(--redup); }
+
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+
+.key {
+  min-height: 52px;
+  background: rgba(232, 227, 214, .09);
+  color: var(--tile);
+  border: 1px solid var(--garis);
+  border-radius: 4px;
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.key:active { background: rgba(232, 227, 214, .18); }
+
+/* SPEC.md rule 4 — `0` spans two columns, which is what keeps the pad nine keys
+   over four rows with no minus and no decimal point to put anywhere. */
+.span2 { grid-column: span 2; }
+
+#hu-commit:disabled { opacity: .45; cursor: default; }

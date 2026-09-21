@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Pencatat Skor Maciok</title>
+<!-- The icon link is what closes the /favicon.ico request. A browser asks for
+     /favicon.ico at the site root when no icon is declared, and on Pages the app
+     lives at /<repo>/, so that request is a 404 on every single load — the one
+     404 Task 15's deploy check would otherwise fail on, and the only one the app
+     can prevent from inside. -->
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<!-- iOS reads apple-touch-icon and ignores `icons` in the manifest; both are
+     needed or the home-screen icon is a screenshot of the page. -->
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#12312A">
+<!-- Both spellings, deliberately. Chromium warns that `apple-mobile-web-app-capable`
+     is deprecated and asks for the `mobile-web-app-` form; iOS Safari still reads
+     only the `apple-` form. Dropping either one costs the standalone window on that
+     platform, and the pair costs four lines. Measured: the browser logged the
+     deprecation on every load of a correct build. -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Skor Maciok">
+<link rel="stylesheet" href="app.css">
+<!-- Paths are app-relative (tiles/x.svg, js/ui.js) — never root-absolute. The app is
+     served from a /<repo>/ subpath on Pages, where a root-absolute module path 404s
+     while passing on localhost. Task 14 check 4 greps for that. -->
+</head>
+<body data-view="meja">
+
+<h1 class="sr-only">Pencatat Skor Maciok</h1>
+
+<p id="banner" class="banner" role="status" hidden></p>
+
+<main>
+  <!-- ── meja — the table seen from above ─────────────────────────────────── -->
+  <section id="view-meja" class="view">
+    <div class="meja-bar">
+      <span class="meja-label">Meja</span>
+      <button id="btn-setup" class="link-btn" type="button">Ubah susunan</button>
+    </div>
+
+    <!-- The diamond. Three equal columns AND three equal rows over an
+         aspect-ratio:1 container — that is what makes all nine cells squares of
+         the same size. Size never comes from a seat element, because a seat
+         larger than its neighbours implies a rank the table does not have. -->
+    <div class="table" id="table">
+      <button class="seat" data-seat="pei" type="button">
+        <span class="seat-id"><span class="kompas">N</span><img class="tile" src="tiles/pei.svg" alt=""></span>
+        <span class="seat-nama">—</span>
+        <span class="seat-skor">—</span>
+      </button>
+
+      <button class="seat" data-seat="si" type="button">
+        <span class="seat-id"><span class="kompas">W</span><img class="tile" src="tiles/si.svg" alt=""></span>
+        <span class="seat-nama">—</span>
+        <span class="seat-skor">—</span>
+      </button>
+
+      <!-- The one bold element: Σ, gold, at the centre the four seats surround. -->
+      <div class="plaque" id="plaque" data-anomali="false">
+        <span class="sigma">Σ <span class="total" id="plaque-total">0</span></span>
+      </div>
+
+      <button class="seat" data-seat="tung" type="button">
+        <span class="seat-id"><span class="kompas">E</span><img class="tile" src="tiles/tung.svg" alt=""></span>
+        <span class="seat-nama">—</span>
+        <span class="seat-skor">—</span>
+      </button>
+
+      <button class="seat" data-seat="nan" type="button">
+        <span class="seat-id"><span class="kompas">S</span><img class="tile" src="tiles/nan.svg" alt=""></span>
+        <span class="seat-nama">—</span>
+        <span class="seat-skor">—</span>
+      </button>
+    </div>
+
+    <!-- How to install, in copy rather than a button. There is no install button
+         the app can offer: Chrome fires `beforeinstallprompt` only on its own
+         schedule and iOS Safari has never fired it at all, so a button would work
+         on some phones and sit dead on others. Instructions work everywhere.
+         Hidden by CSS once installed (`display-mode: standalone`) — this is a
+         standing hint for a browser tab, not a step in a flow, so it does not
+         disappear as soon as the log is non-empty. -->
+    <div class="pasang" id="pasang">
+      <p class="pasang-judul">Pasang di layar utama</p>
+      <p class="pasang-baris">iPhone: tombol Bagikan → Tambahkan ke Layar Utama.</p>
+      <p class="pasang-baris">Android: menu ⋮ → Instal aplikasi.</p>
+      <p class="pasang-baris pasang-alasan">Setelah dipasang, aplikasi tetap jalan tanpa internet.</p>
+    </div>
+  </section>
+
+  <!-- ── skor — the board, then the log. Both render from the event log; no number
+         and no name is written in this file. Rows and history are built in ui.js
+         because they are derived, unlike the four seats on meja, which are fixed
+         positions on the table and so are markup. -->
+  <section id="view-skor" class="view">
+    <p class="skor-label">Skor</p>
+    <ol class="papan" id="skor-papan"></ol>
+
+    <div class="riwayat-wrap">
+      <p class="skor-label">Riwayat</p>
+      <ol class="riwayat" id="skor-riwayat"></ol>
+      <!-- SPEC.md rule 7 — empty is an invitation, not an error. Shown for as long
+           as the log is empty, and hidden the moment it is not. -->
+      <p class="empty" id="skor-kosong">Belum ada catatan. Ketuk nama pemain untuk mulai.</p>
+    </div>
+
+    <p class="error" id="skor-error" role="alert" hidden></p>
+    <!-- `Σ <total> / <n × start>`. The promise stated as two numbers that are equal
+         whenever the table is balanced. Not gold: SPEC.md pins --kim to the meja
+         plaque numerals and calls it the only gold in the app. -->
+    <p class="skor-total" id="skor-total" data-anomali="false">Σ <span class="angka" id="skor-angka">0</span> / <span class="angka" id="skor-harap">0</span></p>
+  </section>
+
+  <!-- ── utang — the loan ledger with its entry form on the same screen, not a
+         sheet: a loan names **two** players, and the action sheet that opens from a
+         seat names one. SPEC.md rule 11 puts the ledger and the entry together.
+         Every row and every total below is built in ui.js from the log; no name and
+         no number is written in this file. -->
+  <section id="view-utang" class="view">
+    <p class="skor-label">Utang</p>
+    <ol class="papan utang-papan" id="utang-papan"></ol>
+
+    <!-- The fifth zero-sum surface: Σ pinjaman === Σ pemberian, by construction.
+         Same shape as `#skor-total` and deliberately not gold — SPEC.md pins --kim
+         to the meja plaque numerals. Labelled on both sides, unlike the score
+         footer, because the two numbers here are different quantities and not a
+         value against an expectation. -->
+    <p class="skor-total" id="utang-total" data-anomali="false">Σ dipinjam <span class="angka" id="utang-dipinjam">0</span> / dipinjamkan <span class="angka" id="utang-dipinjamkan">0</span></p>
+
+    <!-- Task 10 step 3, and the whole reason this view is separate from the board. -->
+    <p class="utang-catatan">Skor tidak berubah — utang diselesaikan di layar Selesai.</p>
+
+    <div class="riwayat-wrap">
+      <p class="skor-label">Catatan</p>
+      <ol class="riwayat" id="utang-riwayat"></ol>
+      <!-- The ledger's own empty state, not the log's: a game can be full of hands
+           and have no loans in it, so this keys on the utang rows and not on the
+           event count. SPEC.md rule 7 — empty is an invitation, not an error. -->
+      <p class="empty" id="utang-kosong">Belum ada catatan. Pinjam-meminjam belum tercatat.</p>
+    </div>
+
+    <!-- Inline, not a sheet. The borrower and the lender are both chosen here, and
+         the lender list is not filtered: the rule is "must differ", so it is stated
+         and checked rather than made unreachable — the error message is the record
+         that the rule exists. -->
+    <!-- `novalidate`: the browser's own validation answers in the browser's locale,
+         in a balloon that a phone shows once and drops. Every value this form accepts
+         is already checked below in Bahasa Indonesia, and the app's checks are a
+         strict superset of `min`/`step` — so letting the app speak is never weaker.
+         The attributes stay: they pick the numeric keypad and set the arrow step. -->
+    <form id="utang-form" class="utang-form" novalidate>
+      <div class="utang-baris">
+        <label class="utang-field">Peminjam <select id="utang-borrower"></select></label>
+        <label class="utang-field">Pemberi <select id="utang-lender"></select></label>
+      </div>
+      <div class="utang-baris">
+        <label class="utang-field">Jumlah (poin)
+          <input id="utang-amount" type="number" inputmode="numeric" step="1" min="1" autocomplete="off">
+        </label>
+        <label class="utang-field">Catatan (opsional)
+          <input id="utang-note" type="text" autocomplete="off" enterkeyhint="done">
+        </label>
+      </div>
+      <p class="error" id="utang-error" role="alert" hidden></p>
+      <button type="submit" class="sheet-btn utama">Catat</button>
+    </form>
+  </section>
+
+  <!-- ── selesai — the three blocks that square the table up ───────────────────
+       They are on one screen because none of them is readable alone: a net of
+       +150 beside a loan of 200 is a player who still owes 50, and only the
+       balance says so. Every figure below is `settle.js`'s own output — the net
+       from `scoresFrom`, the loans from `loanTotals`, the transfers from
+       `settleUp` — and nothing here shortens or re-orders the list the engine
+       returned (C1). All wording is **poin**; no currency, ever (PRD). -->
+  <section id="view-selesai" class="view">
+    <p class="skor-label">Selesai</p>
+
+    <p class="selesai-label">Hasil permainan</p>
+    <ol class="papan selesai-hasil" id="selesai-hasil"></ol>
+
+    <p class="selesai-label">Utang</p>
+    <ol class="papan utang-papan" id="selesai-utang"></ol>
+    <!-- The ledger's own empty state, not the log's: a game can be full of hands
+         and have no loans in it. -->
+    <p class="empty selesai-kosong" id="selesai-utang-kosong">Tidak ada pinjaman.</p>
+
+    <p class="selesai-label">Transfer akhir</p>
+    <ol class="selesai-transfer" id="selesai-transfer"></ol>
+    <!-- The count, then the bound it never exceeds — `n − 1` from `settleUp`'s own
+         greedy pass, not a typed 3. The bound is stated because it is the promise
+         the list is short enough to read at a table; it is hidden rather than
+         falsified if a list ever came back longer. -->
+    <p class="selesai-ringkas"><span class="angka" id="selesai-jumlah">0</span> transfer <span class="selesai-batas" id="selesai-batas" hidden></span></p>
+    <!-- SPEC.md rule 7 — empty is an invitation, not an error. Keys on the log, so
+         a settled table with a night of hands behind it is never called empty. -->
+    <p class="empty" id="selesai-kosong">Belum ada catatan. Ketuk nama pemain untuk mulai.</p>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="Pindah layar">
+  <button type="button" data-goto="meja" aria-current="true">Meja</button>
+  <button type="button" data-goto="skor" aria-current="false">Skor</button>
+  <button type="button" data-goto="utang" aria-current="false">Utang</button>
+  <button type="button" data-goto="selesai" aria-current="false">Selesai</button>
+</nav>
+
+<div id="scrim" class="scrim" hidden></div>
+
+<!-- ── action sheet — a seat is the tap target ─────────────────────────────── -->
+<section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-who" hidden>
+  <p class="sheet-who" id="sheet-who"></p>
+  <!-- "Hu" is the act of winning, and that is what this button starts. YDSP row 1
+       separately names one hand "Fu" in src/data/scoring-table.mjs; the two are not
+       the same word. Do not "correct" this label to match the data file (SPEC.md 3). -->
+  <button type="button" class="sheet-btn utama" data-action="hu">Hu</button>
+  <button type="button" class="sheet-btn" data-action="penalti">Penalti</button>
+  <button type="button" class="sheet-btn" data-action="koin">Koin</button>
+  <button type="button" class="sheet-btn batal" data-action="batal">Batal</button>
+</section>
+
+<!-- ── hu — the win flow: method → (discarder) → tay → preview → commit ──────
+     One dialog carrying three steps rather than three dialogs, so there is never
+     a second scrim to unwind. Every method label and citation is rendered from
+     `HU_METHODS` in rules.js; nothing here restates a rule number. -->
+<section id="hu" class="sheet sheet-hu" role="dialog" aria-modal="true" aria-labelledby="hu-title" hidden>
+  <h2 id="hu-title">Hu — <span id="hu-who"></span></h2>
+
+  <div class="hu-panel" data-hu-step="metode">
+    <p class="hu-label">Metode</p>
+    <div class="hu-list" id="hu-methods"></div>
+  </div>
+
+  <div class="hu-panel" data-hu-step="buang" hidden>
+    <p class="hu-label">Buang siapa?</p>
+    <div class="hu-list" id="hu-discarders"></div>
+  </div>
+
+  <div class="hu-panel" data-hu-step="tay" hidden>
+    <p class="hu-metode" id="hu-metode"></p>
+    <p class="hu-tay"><span class="hu-tay-num" id="hu-tay">—</span> <span class="hu-tay-unit">tay</span></p>
+    <p class="hu-preview" id="hu-preview" role="status"></p>
+    <p class="hu-floor" id="hu-floor" hidden></p>
+    <!-- YDSP P8/P9 (Ping Fu hilang): a rule about the hand, not about the arithmetic.
+         It sits above the keypad because it changes which number the player should
+         type. Text comes from rules.js — no rule number is written in this file. -->
+    <p class="hu-reminder" id="hu-reminder"></p>
+    <div class="keypad" id="hu-keypad">
+      <button type="button" class="key" data-key="1">1</button>
+      <button type="button" class="key" data-key="2">2</button>
+      <button type="button" class="key" data-key="3">3</button>
+      <button type="button" class="key" data-key="4">4</button>
+      <button type="button" class="key" data-key="5">5</button>
+      <button type="button" class="key" data-key="6">6</button>
+      <button type="button" class="key" data-key="7">7</button>
+      <button type="button" class="key" data-key="8">8</button>
+      <button type="button" class="key" data-key="9">9</button>
+      <button type="button" class="key" data-key="back" aria-label="Hapus satu angka">⌫</button>
+      <button type="button" class="key span2" data-key="0">0</button>
+    </div>
+    <p class="error" id="hu-error" role="alert" hidden></p>
+    <button type="button" class="sheet-btn utama" id="hu-commit" disabled>Catat</button>
+  </div>
+
+  <button type="button" class="sheet-btn batal" data-hu-cancel>Batal</button>
+</section>
+
+<!-- ── penalti — pick a YDSP row, then Catat. Every row v1 offers is a Lew Fit, so
+     there is no number to type and no number pad here: a pad with nothing to enter
+     would be a second screen of UI standing behind a dead branch. Row labels and
+     citations render from `PENALTY_ROWS` in rules.js; no rule number is written in
+     this file. -->
+<section id="penalti" class="sheet sheet-penalti" role="dialog" aria-modal="true" aria-labelledby="penalti-title" hidden>
+  <h2 id="penalti-title">Penalti — <span id="penalti-who"></span></h2>
+
+  <p class="hu-label">Jenis</p>
+  <div class="hu-list" id="penalti-rows"></div>
+
+  <!-- The limitation, on screen as Task 7 requires. Lew Fit is recorded and nothing
+       else: the app does not know whose turn it is, so it cannot enforce a
+       restriction, and a UI that greyed a player out would be enforcing a rule it
+       cannot see. Copy, not a rule number, so it lives here rather than in rules.js. -->
+  <p class="hu-reminder">Hanya dicatat. Aplikasi tidak mengunci permainan atau membatasi pemain.</p>
+
+  <p class="error" id="penalti-error" role="alert" hidden></p>
+  <button type="button" class="sheet-btn utama" id="penalti-commit" disabled>Catat</button>
+  <button type="button" class="sheet-btn batal" data-penalti-cancel>Batal</button>
+</section>
+
+<!-- ── koin — pick a combination, then Catat. Kong and flowers are paid in coins
+     at the table and never enter tay, which is why this is a flow of its own and
+     not a line on the Hu sheet. Labels and amounts render from `KOIN` in rules.js;
+     no amount is written in this file. -->
+<section id="koin" class="sheet sheet-koin" role="dialog" aria-modal="true" aria-labelledby="koin-title" hidden>
+  <h2 id="koin-title">Koin — <span id="koin-who"></span></h2>
+
+  <p class="hu-label">Jenis</p>
+  <div class="hu-list" id="koin-rows"></div>
+
+  <!-- The rule that makes this a separate flow, on screen. A player who thinks these
+       are hand points will look for them in the tay they type; they are not there. -->
+  <p class="hu-reminder">Dibayar langsung, tidak masuk tay.</p>
+
+  <p class="error" id="koin-error" role="alert" hidden></p>
+  <button type="button" class="sheet-btn utama" id="koin-commit" disabled>Catat</button>
+  <button type="button" class="sheet-btn batal" data-koin-cancel>Batal</button>
+</section>
+
+<!-- ── setup — a first-run sheet over meja, not a fifth view ───────────────── -->
+<section id="setup" class="sheet sheet-setup" role="dialog" aria-modal="true" aria-labelledby="setup-title" hidden>
+  <h2 id="setup-title">Susunan Meja</h2>
+  <!-- `novalidate` for the same reason as the utang form: `submitSetup` checks
+       Modal awal with a strict superset of `min`/`step`, so the app's message is
+       the one that should be read. -->
+  <form id="setup-form" novalidate>
+    <div class="peserta">
+      <label>Nama <input type="text" name="nama-0" autocomplete="off" enterkeyhint="next"></label>
+      <label>Kursi
+        <select name="kursi-0">
+          <option value="tung">Tung</option><option value="nan">Nan</option>
+          <option value="si">Si</option><option value="pei">Pei</option>
+        </select>
+      </label>
+    </div>
+    <div class="peserta">
+      <label>Nama <input type="text" name="nama-1" autocomplete="off" enterkeyhint="next"></label>
+      <label>Kursi
+        <select name="kursi-1">
+          <option value="tung">Tung</option><option value="nan">Nan</option>
+          <option value="si">Si</option><option value="pei">Pei</option>
+        </select>
+      </label>
+    </div>
+    <div class="peserta">
+      <label>Nama <input type="text" name="nama-2" autocomplete="off" enterkeyhint="next"></label>
+      <label>Kursi
+        <select name="kursi-2">
+          <option value="tung">Tung</option><option value="nan">Nan</option>
+          <option value="si">Si</option><option value="pei">Pei</option>
+        </select>
+      </label>
+    </div>
+    <div class="peserta">
+      <label>Nama <input type="text" name="nama-3" autocomplete="off" enterkeyhint="next"></label>
+      <label>Kursi
+        <select name="kursi-3">
+          <option value="tung">Tung</option><option value="nan">Nan</option>
+          <option value="si">Si</option><option value="pei">Pei</option>
+        </select>
+      </label>
+    </div>
+
+    <label class="modal-awal">Modal awal
+      <input id="setup-start" type="number" inputmode="numeric" step="1" min="0">
+      <span class="hint">poin tiap pemain — bisa diubah</span>
+    </label>
+
+    <p id="setup-error" class="error" role="alert" hidden></p>
+    <button type="submit" class="sheet-btn utama">Simpan</button>
+  </form>
+
+  <!-- ── arsip — export and import ───────────────────────────────────────────
+       Here rather than on a view, because it is table-level rather than a per-hand
+       action, and because SPEC.md pins the app to four views. LAW 5: expiry is
+       archive, not delete — this is the archive path, and also the recovery path
+       for the localStorage failure the app reports as "tidak terbaca".
+
+       The line under the label states the asymmetry, because the two buttons look
+       alike and are not: export only reads, import replaces everything. That
+       sentence is the warning; the confirm dialog after it names precisely what
+       is about to be lost. -->
+  <div class="arsip">
+    <p class="arsip-judul">Arsip</p>
+    <p class="arsip-catatan">Ekspor menyimpan seluruh catatan ke satu berkas. Impor menggantikan catatan yang ada sekarang.</p>
+    <div class="arsip-tombol">
+      <button type="button" class="link-btn" id="io-export">Ekspor</button>
+      <button type="button" class="link-btn" id="io-import">Impor</button>
+    </div>
+    <!-- Hidden, and triggered by the Impor button: a bare file input renders as a
+         native control in the OS locale, which is the one piece of chrome in this
+         app that would not be in Bahasa Indonesia. -->
+    <input type="file" id="io-file" accept="application/json,.json" hidden>
+    <p class="error" id="io-error" role="alert" hidden></p>
+
+    <!-- The confirm, in the sheet rather than `window.confirm`. The native dialog
+         puts its buttons in the OS locale — "OK" and "Cancel" in the middle of an
+         app that is Bahasa Indonesia everywhere else — and, more to the point, it
+         is a dialog the app cannot put anything into: the sentence naming what is
+         about to be replaced is the whole reason this step exists. Its text is
+         built in ui.js from the live log, so it can never describe a table other
+         than the one on screen. -->
+    <div class="arsip-konfirmasi" id="io-konfirmasi" hidden>
+      <p class="arsip-tanya" id="io-tanya" role="alert"></p>
+      <div class="arsip-tombol">
+        <button type="button" class="sheet-btn utama" id="io-ya">Ya, impor</button>
+        <button type="button" class="sheet-btn batal" id="io-batal">Batal</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script type="module" src="js/ui.js"></script>
+
+<!-- Service worker registration. Inline rather than a fifth module: it is three
+     lines that own no state and touch no DOM, and putting it in `ui.js` would
+     couple the scoring UI to the shell for no gain.
+     `serviceWorker` is a [SecureContext] member — over `http://<LAN-IP>:8000` it
+     does not exist, so this guard is what keeps a LAN test from throwing. The
+     registration itself is `sw.js` relative to the document, which is what makes
+     it resolve under the Pages subpath. -->
+<script type="module">
+  if ("serviceWorker" in navigator) {
+    // `load` rather than immediately: the install fetches 55 files, and starting
+    // that alongside the first paint competes for the phone's bandwidth with the
+    // tiles the table is already waiting on.
+    addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {
+        // No offline, but the app still works — a console error here would be
+        // noise in a run where nothing a player can see is broken.
+      });
+    });
+  }
+</script>
+</body>
+</html>
