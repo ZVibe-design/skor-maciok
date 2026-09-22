@@ -22,7 +22,7 @@
      4.39:1 against --meja: under WCAG AA's 4.5:1 for text this size, and the kind of
      miss that never shows up in a screenshot. .62 measures 5.14:1 and is the smallest
      value that clears, so this is a floor rather than a taste call. It is raised at the
-     TOKEN because ~15 text colours across all four views read it, and a scoped override
+     TOKEN because ~15 text colours across every view read it, and a scoped override
      would have fixed the two on Meja while leaving the other thirteen failing. */
   --redup: rgba(232, 227, 214, .62);
 }
@@ -39,8 +39,9 @@
    Measured 2026-09-22 at all four T20 viewports before this was written: the tabbar
    was NOT clipped at any of them (`tabbar.bottom === innerHeight` on all 16
    view/size rows, and the document never scrolled). So this is a correctness fix,
-   not the fix for the reported "wrong resolution" — that turned out to be `utang`'s
-   horizontal overflow, which zooms the page out. See `.utang-baris`. */
+   not the fix for the reported "wrong resolution" — that turned out to be horizontal
+   overflow on the loan entry screen, which zoomed the page out. That screen and its
+   `min-width: 0` fix are both gone as of SPEC 3; neither is what this rule is for. */
 html, body { height: 100%; height: 100dvh; }
 
 body {
@@ -92,7 +93,6 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .view { display: none; flex: 1; flex-direction: column; min-height: 0; overflow-y: auto; }
 body[data-view="meja"] #view-meja,
 body[data-view="skor"] #view-skor,
-body[data-view="utang"] #view-utang,
 body[data-view="selesai"] #view-selesai { display: flex; }
 
 .banner {
@@ -561,97 +561,21 @@ body[data-view="selesai"] #view-selesai { display: flex; }
 
 .skor-total[data-anomali="true"] .angka { color: var(--tile); }
 
-/* ── utang ─────────────────────────────────────────────────────────────────── */
+/* ── selesai — the result, and the archive ─────────────────────────────────── */
 
-/* Slimmer than `.papan`: these rows carry no tile and no headline number, only a
-   name and two small totals, and the screen has a ledger and a form under them.
-   The 22px tile the board uses would push the list it belongs beside off screen. */
-.utang-papan { margin-bottom: 0; gap: 4px; }
+/* Selesai was the tallest view — a fixed stack of blocks whose height was set by the
+   settlement, the loan list, the transfer list and the archive block at its foot —
+   and Task 19 gave it its own `overflow-y: auto` here when that stack was found
+   painting over the fixed tabbar. That rule is gone as of Task 20: `.view` carries
+   it now, for every view, so an override here would be a second declaration of the
+   same thing and the next reader could not tell which one was load-bearing.
+   Measured before the move, at 390x664 on a game with a loan: the view's content
+   overflowed 655px into a 590px box. SPEC 3 removed three of those four blocks, so
+   the screen is shorter than when this was measured — the reasoning is unchanged. */
 
-.utang-papan .utang-baris {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: baseline;
-  gap: 8px;
-  padding: 3px 8px;
-  background: rgba(232, 227, 214, .06);
-  border: 1px solid var(--garis);
-  border-radius: 4px;
-}
-
-.utang-nama {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: .85rem;
-}
-
-/* The plan's own template — `Tung meminjam 200 · Pei meminjamkan 200` — for one
-   player: both clauses, so a player who has neither borrowed nor lent says so
-   instead of being absent from the list. Right-aligned in a tabular font, so the
-   four rows read as a column of figures. */
-.utang-angka { text-align: right; font-size: .8rem; color: var(--redup); }
-
-/* Task 10 step 3. Not `.error` — this is a statement about the app's arithmetic,
-   not a failure, and cinnabar is reserved for the primary action and anomalies. */
-.utang-catatan {
-  margin: 8px 0 10px;
-  font-size: .78rem;
-  line-height: 1.3;
-  color: var(--redup);
-}
-
-.utang-form { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-
-/* Two fields per row: the pair of players, then the amount beside the note. Keeps
-   the form to three rows on a 390px screen, which is what leaves the ledger a
-   usable height above it. */
-.utang-baris { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; }
-
-/* The horizontal-overflow fix, and it is load-bearing for this task's own gate.
-   A `1fr` track is really `minmax(auto, 1fr)`, so its floor is the item's min-content
-   width — and `input#utang-note` carries no `size` attribute, which makes its default
-   `size=20` a **203px intrinsic width**. Two such tracks plus the gap floored the view
-   at 430px, so at 320 and at 390 wide the page was wider than the screen and mobile
-   Chrome zoomed out to fit: measured `scrollWidth 430` against `clientWidth 320` (110px
-   over) and against `390` (40px over).
-
-   That zoom-out is the reported "wrong resolution" — and it is why this had to be fixed
-   inside Task 20 rather than after it. Zooming raises `window.innerHeight` to 764 on a
-   568px viewport, so a tabbar-versus-`innerHeight` comparison reads 764/764, a PASS,
-   while telling you nothing about whether the bar clears. Task 20's ACCEPT gate is
-   320x568, which is exactly where the error is largest. Step 5's larger fonts widen the
-   input's intrinsic width further, so the gate would have drifted *further* from the
-   truth with every later edit.
-
-   `min-width: 0` removes the floor; the fields then share what is actually there. It is
-   on the grid items rather than on the input alone because the track's floor comes from
-   the item, so fixing only the input would leave the track unable to shrink. */
-.utang-baris > * { min-width: 0; }
-
-/* The note under the event text, not beside it: it is the player's own words about
-   the row above and reads as a continuation of it. */
-.utang-note { display: block; font-size: .75rem; color: var(--redup); }
-
-/* Three columns, not the history's four: a loan has no delta to show in the slot
-   the scoreboard uses for one. The amount is already in the sentence, and a second
-   copy of it in a column would be a number that could disagree with the first. */
-#utang-riwayat .riwayat-baris { grid-template-columns: auto 1fr auto; }
-
-/* ── selesai — hasil, utang, transfer akhir ────────────────────────────────── */
-
-/* Selesai is the tallest view — a fixed stack of blocks whose height is set by the
-   transfer list and the archive block at its foot — and Task 19 gave it its own
-   `overflow-y: auto` here when that stack was found painting over the fixed tabbar.
-   That rule is gone as of Task 20: `.view` carries it now, for all four views, so an
-   override here would be a second declaration of the same thing and the next reader
-   could not tell which one was load-bearing. Measured before the move, at 390x664 on
-   a game with a loan: the view's content overflowed 655px into a 590px box. */
-
-/* The three block headings are the screen's whole structure: each one names the
-   question the rows under it answer. Closer to its own list than to the block above,
-   so the grouping is legible without a divider. */
+/* The one block heading is the screen's whole structure: it names the question the
+   rows under it answer. Closer to its own list than to the block above, so the
+   grouping is legible without a divider. */
 .selesai-label { margin: 12px 0 4px; font-size: .78rem; color: rgba(232, 227, 214, .7); }
 
 /* Three columns, not the four `.papan-baris` carries: a settlement row names a player
@@ -659,29 +583,6 @@ body[data-view="selesai"] #view-selesai { display: flex; }
    where a seat is read, and repeating it here would be a second copy of the table. */
 #selesai-hasil .papan-baris { grid-template-columns: 1fr auto auto; }
 
-/* `.empty` centres itself with `margin: auto`, which inside this column flexes the
-   rest of the screen apart. "Tidak ada pinjaman." is a statement in the flow of the
-   Utang block, not a placeholder standing in for a list that failed to render. */
-.selesai-kosong { margin: 0 0 10px; padding: 0; text-align: left; font-size: .82rem; }
-
-/* One payment per row, in the sentence that states it: who pays, who receives, how
-   much. Weight 800 because this is the number the table acts on — it is the heaviest
-   type on the screen after the Σ plaque, which is deliberate. */
-.selesai-transfer { display: grid; gap: 6px; margin: 0 0 8px; padding: 0; list-style: none; }
-
-.transfer-baris {
-  padding: 8px 10px;
-  background: rgba(232, 227, 214, .06);
-  border: 1px solid var(--garis);
-  border-radius: 4px;
-  font-size: .95rem;
-  font-weight: 800;
-}
-
-/* The count and the bound it never exceeds. Quieter than the rows above, because it
-   is a statement about the list rather than a payment in it. */
-.selesai-ringkas { margin: 0; font-size: .8rem; color: var(--redup); }
-.selesai-ringkas .angka { color: var(--tile); font-weight: 800; }
 /* The maker credit at the foot of the screen. A hairline rule rather than a
    box, for the same reason `.pasang` uses one: a filled, bordered rectangle is a card,
    and a card is what made this app read as a dashboard. It sits below `#selesai-kosong`
@@ -737,7 +638,7 @@ body[data-view="selesai"] #view-selesai { display: flex; }
   inset-inline: 0;
   bottom: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   background: var(--panel);
   border-top: 1px solid var(--garis);
   padding-bottom: env(safe-area-inset-bottom, 0px);
@@ -751,7 +652,7 @@ body[data-view="selesai"] #view-selesai { display: flex; }
   color: var(--redup);
   font: inherit;
   /* Was .8rem (12.8px), then .875rem (14px) in Task 20 — the largest raise in the app
-     because the four nav labels are the primary navigation. Meja's redesign took it to
+     because the nav labels are the primary navigation. Meja's redesign took it to
      1rem (16px), the floor the screen brief sets for the bottom nav; the label is one
      line, so it still fits inside the 48px `min-height` and the bar's measured height
      is unchanged. **Task 21 reserves the band from that measured height, so if this
@@ -825,13 +726,13 @@ body[data-view="selesai"] #view-selesai { display: flex; }
   align-items: end;
 }
 
-/* One label treatment and one field treatment for every form in the app — the
-   setup sheet and the utang view alike. `.utang-field` is listed here rather than
-   given a copy of these rules: a second 9-line block is a second thing to keep in
-   sync, and the 44px floor is a SPEC rule that must not drift between screens. */
+/* One label treatment and one field treatment for every form in the app. Both groups
+   are shared rather than copied because the 44px floor is a SPEC rule that must not
+   drift between screens — the setup sheet is the only form left (SPEC 3 removed the
+   loan form that used to sit in the other group), and the declaration stays a group
+   so the next form added joins it instead of starting a second one. */
 .peserta label,
-.modal-awal,
-.utang-field {
+.modal-awal {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -841,9 +742,7 @@ body[data-view="selesai"] #view-selesai { display: flex; }
 
 .peserta input,
 .peserta select,
-.modal-awal input,
-.utang-form input,
-.utang-form select {
+.modal-awal input {
   min-height: 44px;
   padding: 8px 10px;
   background: rgba(232, 227, 214, .08);

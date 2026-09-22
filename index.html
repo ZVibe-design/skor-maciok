@@ -117,93 +117,25 @@
     <p class="skor-total" id="skor-total" data-anomali="false">Σ <span class="angka" id="skor-angka">0</span> / <span class="angka" id="skor-harap">0</span></p>
   </section>
 
-  <!-- ── utang — the loan ledger with its entry form on the same screen, not a
-         sheet: a loan names **two** players, and the action sheet that opens from a
-         seat names one. SPEC.md rule 11 puts the ledger and the entry together.
-         Every row and every total below is built in ui.js from the log; no name and
-         no number is written in this file. -->
-  <section id="view-utang" class="view">
-    <p class="skor-label">Utang</p>
-    <ol class="papan utang-papan" id="utang-papan"></ol>
-
-    <!-- The fifth zero-sum surface: Σ pinjaman === Σ pemberian, by construction.
-         Same shape as `#skor-total` and deliberately not gold — SPEC.md pins --kim
-         to the meja plaque numerals. Labelled on both sides, unlike the score
-         footer, because the two numbers here are different quantities and not a
-         value against an expectation. -->
-    <p class="skor-total" id="utang-total" data-anomali="false">Σ dipinjam <span class="angka" id="utang-dipinjam">0</span> / dipinjamkan <span class="angka" id="utang-dipinjamkan">0</span></p>
-
-    <!-- Task 10 step 3, and the whole reason this view is separate from the board. -->
-    <p class="utang-catatan">Skor tidak berubah — utang diselesaikan di layar Selesai.</p>
-
-    <div class="riwayat-wrap">
-      <p class="skor-label">Catatan</p>
-      <ol class="riwayat" id="utang-riwayat"></ol>
-      <!-- The ledger's own empty state, not the log's: a game can be full of hands
-           and have no loans in it, so this keys on the utang rows and not on the
-           event count. SPEC.md rule 7 — empty is an invitation, not an error. -->
-      <p class="empty" id="utang-kosong">Belum ada catatan. Pinjam-meminjam belum tercatat.</p>
-    </div>
-
-    <!-- Inline, not a sheet. The borrower and the lender are both chosen here, and
-         the lender list is not filtered: the rule is "must differ", so it is stated
-         and checked rather than made unreachable — the error message is the record
-         that the rule exists. -->
-    <!-- `novalidate`: the browser's own validation answers in the browser's locale,
-         in a balloon that a phone shows once and drops. Every value this form accepts
-         is already checked below in Bahasa Indonesia, and the app's checks are a
-         strict superset of `min`/`step` — so letting the app speak is never weaker.
-         The attributes stay: they pick the numeric keypad and set the arrow step. -->
-    <form id="utang-form" class="utang-form" novalidate>
-      <div class="utang-baris">
-        <label class="utang-field">Peminjam <select id="utang-borrower"></select></label>
-        <label class="utang-field">Pemberi <select id="utang-lender"></select></label>
-      </div>
-      <div class="utang-baris">
-        <label class="utang-field">Jumlah (poin)
-          <input id="utang-amount" type="number" inputmode="numeric" step="1" min="1" autocomplete="off">
-        </label>
-        <label class="utang-field">Catatan (opsional)
-          <input id="utang-note" type="text" autocomplete="off" enterkeyhint="done">
-        </label>
-      </div>
-      <p class="error" id="utang-error" role="alert" hidden></p>
-      <button type="submit" class="sheet-btn utama">Catat</button>
-    </form>
-  </section>
-
-  <!-- ── selesai — the three blocks that square the table up ───────────────────
-       They are on one screen because none of them is readable alone: a net of
-       +150 beside a loan of 200 is a player who still owes 50, and only the
-       balance says so. Every figure below is `settle.js`'s own output — the net
-       from `scoresFrom`, the loans from `loanTotals`, the transfers from
-       `settleUp` — and nothing here shortens or re-orders the list the engine
-       returned (C1). All wording is **poin**; no currency, ever (PRD). -->
+  <!-- ── selesai — the result, and the archive door ─────────────────────────────
+       One block of numbers, because the table's arithmetic has one output: the net
+       each player won, from `scoresFrom`. Nothing here shortens or re-orders what
+       the engine returned (C1). Loans and the transfer list used to sit below this
+       heading; SPEC 3 removed both, so the settlement is the single figure this
+       screen shows and the archive door follows it directly. All wording is
+       **poin**; no currency, ever (PRD). -->
   <section id="view-selesai" class="view">
     <p class="skor-label">Selesai</p>
 
     <p class="selesai-label">Hasil permainan</p>
     <ol class="papan selesai-hasil" id="selesai-hasil"></ol>
 
-    <p class="selesai-label">Utang</p>
-    <ol class="papan utang-papan" id="selesai-utang"></ol>
-    <!-- The ledger's own empty state, not the log's: a game can be full of hands
-         and have no loans in it. -->
-    <p class="empty selesai-kosong" id="selesai-utang-kosong">Tidak ada pinjaman.</p>
-
-    <p class="selesai-label">Transfer akhir</p>
-    <ol class="selesai-transfer" id="selesai-transfer"></ol>
-    <!-- The count, then the bound it never exceeds — `n − 1` from `settleUp`'s own
-         greedy pass, not a typed 3. The bound is stated because it is the promise
-         the list is short enough to read at a table; it is hidden rather than
-         falsified if a list ever came back longer. -->
-    <p class="selesai-ringkas"><span class="angka" id="selesai-jumlah">0</span> transfer <span class="selesai-batas" id="selesai-batas" hidden></span></p>
-
-    <!-- LAW 5's archive door. Below the last figure of the settlement and above the
+    <!-- LAW 5's archive door. Below the settlement's last figure and above the
          empty state, so it is the last thing read on a screen whose job is squaring
          up — findable without sitting in that reading path. `.arsip`'s own top rule
-         does the separating; this screen has four blocks of numbers already carrying
-         its structure, and a heading here would be a fifth label for one button.
+         does the separating: with the loan and transfer blocks gone this screen
+         carries one block of numbers, and a heading here would be a second label
+         beside one button.
          Hidden while the log is empty (`renderSelesai`): an empty table has nothing
          to archive, and the control would sit above "Belum ada catatan" offering to
          replace nothing.
@@ -242,14 +174,13 @@
 <nav class="tabbar" aria-label="Pindah layar">
   <button type="button" data-goto="meja" aria-current="true">Meja</button>
   <button type="button" data-goto="skor" aria-current="false">Skor</button>
-  <button type="button" data-goto="utang" aria-current="false">Utang</button>
   <button type="button" data-goto="selesai" aria-current="false">Selesai</button>
 </nav>
 
 <!-- Task 21. A SIBLING of <nav class="tabbar">, never a child: inside it this becomes
-     a fifth grid cell in `repeat(4, 1fr)` and the four nav buttons shrink to make room.
-     Static text, so it is not a <button> and carries no role — nothing taps it, so the
-     44px target minimum does not apply. -->
+     a fourth grid cell in the tabbar's grid and the three nav buttons shrink to make
+     room. Static text, so it is not a <button> and carries no role — nothing taps it,
+     so the 44px target minimum does not apply. -->
 <p class="kredit">oleh CK (93)</p>
 
 <div id="scrim" class="scrim" hidden></div>
@@ -383,9 +314,8 @@
 <!-- ── setup — a first-run sheet over meja, not a fifth view ───────────────── -->
 <section id="setup" class="sheet sheet-setup" role="dialog" aria-modal="true" aria-labelledby="setup-title" hidden>
   <h2 id="setup-title">Susunan Meja</h2>
-  <!-- `novalidate` for the same reason as the utang form: `submitSetup` checks
-       Modal awal with a strict superset of `min`/`step`, so the app's message is
-       the one that should be read. -->
+  <!-- `novalidate`: `submitSetup` checks Modal awal with a strict superset of
+       `min`/`step`, so the app's message is the one that should be read. -->
   <form id="setup-form" novalidate>
     <div class="peserta">
       <label>Nama <input type="text" name="nama-0" autocomplete="off" enterkeyhint="next"></label>

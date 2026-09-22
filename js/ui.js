@@ -7,7 +7,7 @@
 
 import { DEFAULT_START, FU_FLOOR_CITE, FU_FLOOR_TAY, HU_METHODS, KOIN, MAX_ENTRY, MIN_FU_TAY, PENALTY_ROWS, PING_FU_CITE, PING_FU_REMINDER } from "./rules.js";
 import { ARCHIVE_MAX, SEATS, ackDisclaimer, disclaimerAcked, store, validStart } from "./store.js";
-import { applyFuFloor, balancesFrom, cancellations, loanTotals, scoresFrom, settleUp, transfersFor } from "./settle.js";
+import { applyFuFloor, cancellations, scoresFrom, transfersFor } from "./settle.js";
 import { EXPORT_MESSAGES, IMPORT_MESSAGES, ImportError, exportGame, importGame } from "./io.js";
 
 /** The name shown for a seat. The compass letter N/E/S/W lives in index.html. */
@@ -15,9 +15,9 @@ const SEAT_LABEL = { tung: "Tung", nan: "Nan", si: "Si", pei: "Pei" };
 
 /**
  * Wind order (Tung→Pei = E,S,W,N), which is `SEATS` itself, rather than the
- * diamond's compass order. Named once and used by both lists: the board and the
- * ledger are two renderings of one roster, and two copies of this comparator are
- * two chances for them to disagree about who comes first.
+ * diamond's compass order. Named once and used by both lists: the scoreboard and
+ * the Selesai result list are two renderings of one roster, and two copies of this
+ * comparator are two chances for them to disagree about who comes first.
  */
 const windOrder = (a, b) => SEATS.indexOf(a.seat) - SEATS.indexOf(b.seat);
 
@@ -102,7 +102,6 @@ function render() {
   renderBanner();
   renderTable();
   renderSkor();
-  renderUtang();
   renderSelesai();
 }
 
@@ -127,10 +126,10 @@ function fmtNet(n) {
  * What one event moved for the player it names, as the log currently stands.
  *
  * `null` — not `0` — for the two rows that move nothing, because a typed `0` would
- * claim a movement that did not happen. An `utang` is settled at `selesai`, not on
- * the scoreboard (Task 10 states this on screen), and a `koreksi` has no arithmetic
- * of its own at all: settle.js refuses to price one, which is why it is answered
- * before `transfersFor` is ever called.
+ * claim a movement that did not happen. An `utang` never moved a score — a loan was
+ * recorded, never priced — and a `koreksi` has no arithmetic of its own at all:
+ * settle.js refuses to price one, which is why it is answered before `transfersFor`
+ * is ever called.
  */
 function eventDelta(event, players) {
   if (event.type === "koreksi") return null;
@@ -151,9 +150,9 @@ function eventDelta(event, players) {
  *
  * Every event type is listed, `utang` included. The history is the log, and a log
  * view that drops rows cannot be checked against the scores beside it — worse, a
- * `koreksi` cancelling an invisible row would be a reference to nothing. Task 10
- * gives loans a ledger of their own; this is the chronological view of the same log,
- * not a second one.
+ * `koreksi` cancelling an invisible row would be a reference to nothing. No screen
+ * adds loans any more (SPEC 3); a loan already in a log still renders here, and it
+ * must, for the `koreksi` reason above.
  */
 function eventText(event, seqOf) {
   const players = store.state().players;
@@ -195,9 +194,9 @@ function appendKoreksi(targetId, errorSel = "#skor-error") {
     // — a second tab's undo, or an import — say so rather than closing over the
     // failure and letting the tap read as success.
     //
-    // The message goes to the caller's own error line, because the same control now
-    // sits on two screens: a failure reported into `#skor-error` while the player is
-    // looking at the utang ledger is a message they will never see.
+    // The message goes to the caller's own error line rather than a fixed one: the
+    // caller is the one that knows which screen the control sits on, and a failure
+    // reported into another screen's line is a message the player will never see.
     const el = $(errorSel);
     el.hidden = false;
     el.textContent = e.message;
@@ -304,207 +303,22 @@ function renderSkor() {
   }
 }
 
-// ── utang — the ledger, and the form that adds to it ─────────────────────────
+// ── selesai — hasil permainan, and the archive door ───────────────────────────
 //
-// A loan moves no score (DECISIONS.md — "P3 Utang Are a Ledger, Not a Transfer"),
-// so nothing on this screen touches `scoresFrom`. What it shows instead is who owes
-// whom, which the scoreboard cannot answer: `skor` says what each player won,
-// `selesai` says what each player pays, and this is the ledger both of them leave
-// out. The totals come from `loanTotals()` rather than being summed here, for the
-// same reason the board's numbers come from `scoresFrom()` (C1).
-
-/** The roster the two selects were last built for, so a render does not reset them. */
-let utangRoster = "";
-
-/**
- * Fill the borrower/lender selects, in wind order, when the roster has changed.
- *
- * Rebuild-on-every-render would be simpler and wrong: `render()` runs on every
- * append and undo, so a player who picked a lender and was still typing an amount
- * would have their selection wiped by someone else's undo. The signature is the
- * roster's own values, so a rename or a seat swap rebuilds and an unrelated event
- * does not.
- */
-function fillUtangOptions() {
-  const { players } = store.state();
-  const sig = players.map((p) => `${p.id}:${p.name}`).join("|");
-  if (sig === utangRoster) return;
-  utangRoster = sig;
-
-  for (const sel of [$("#utang-borrower"), $("#utang-lender")]) {
-    const keep = sel.value;
-    sel.replaceChildren();
-    for (const p of [...players].sort(windOrder)) {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.name;
-      sel.append(opt);
-    }
-    // A selection that still exists survives a roster edit; one that does not
-    // falls to the browser's first option rather than to an empty select.
-    if (players.some((p) => p.id === keep)) sel.value = keep;
-  }
-}
-
-function setUtangError(msg) {
-  const el = $("#utang-error");
-  el.hidden = !msg;
-  el.textContent = msg ?? "";
-}
-
-function renderUtang() {
-  const { players, events } = store.state();
-  fillUtangOptions();
-  const totals = loanTotals(events, players);
-  const cancelled = cancellations(events);
-  const seqOf = (id) => events.find((e) => e.id === id)?.seq;
-
-  // ── the running totals ─────────────────────────────────────────────────────
-  const papan = $("#utang-papan");
-  papan.replaceChildren();
-  let dipinjam = 0;
-  let dipinjamkan = 0;
-  for (const p of [...players].sort(windOrder)) {
-    const t = totals.get(p.id) ?? { borrowed: 0, lent: 0 };
-    dipinjam += t.borrowed;
-    dipinjamkan += t.lent;
-
-    const li = document.createElement("li");
-    li.className = "utang-baris";
-    const nama = document.createElement("span");
-    nama.className = "utang-nama";
-    nama.textContent = p.name;
-    const angka = document.createElement("span");
-    angka.className = "utang-angka";
-    angka.textContent = `meminjam ${fmt(t.borrowed)} · meminjamkan ${fmt(t.lent)}`;
-    li.append(nama, angka);
-    papan.append(li);
-  }
-
-  // Summed from the same map the rows were read from, so the footer cannot disagree
-  // with the column above it. Σ borrowed === Σ lent holds by construction — every
-  // loan adds to both sides at once — so `data-anomali` is unreachable here exactly
-  // as it is on the scoreboard, and is kept because this is the other half of the
-  // same promise rather than because it can fire.
-  $("#utang-dipinjam").textContent = fmt(dipinjam);
-  $("#utang-dipinjamkan").textContent = fmt(dipinjamkan);
-  $("#utang-total").dataset.anomali = String(players.length > 0 && dipinjam !== dipinjamkan);
-
-  // ── the ledger ─────────────────────────────────────────────────────────────
-  // Cancelled rows stay in the list, struck through, for the same reason they stay
-  // in the history: a correction is a row, and a ledger that hid one could not be
-  // checked against the log. The empty state therefore keys on the utang rows rather
-  // than on `events.length` — a night of hands with no loans in it is not empty.
-  const loans = events.filter((e) => e.type === "utang");
-  $("#utang-kosong").hidden = loans.length > 0;
-  $("#utang-riwayat").hidden = loans.length === 0;
-
-  const riwayat = $("#utang-riwayat");
-  riwayat.replaceChildren();
-  for (const event of [...loans].reverse()) {
-    const nonaktif = cancelled.has(event.id);
-    const li = document.createElement("li");
-    li.className = "riwayat-baris";
-    li.dataset.nonaktif = String(nonaktif);
-
-    const seq = document.createElement("span");
-    seq.className = "riwayat-seq";
-    seq.textContent = `#${event.seq}`;
-
-    // The same sentence the history shows for this row, from the same function —
-    // the ledger is not a second wording of the log, and two renderers would be two
-    // things to keep true.
-    const isi = document.createElement("span");
-    isi.className = "riwayat-isi";
-    isi.textContent = eventText(event, seqOf);
-    if (typeof event.note === "string" && event.note !== "") {
-      const note = document.createElement("span");
-      note.className = "utang-note";
-      note.textContent = event.note;
-      isi.append(note);
-    }
-
-    // The active koreksi's id, not the row's — the same trap the history Undo has,
-    // and the same walk answers it. See `cancellations`.
-    const target = cancelled.get(event.id) ?? event.id;
-    const aksi = document.createElement("button");
-    aksi.type = "button";
-    aksi.className = "riwayat-aksi";
-    aksi.textContent = nonaktif ? "Pulihkan" : "Batalkan";
-    aksi.setAttribute("aria-label", `${aksi.textContent} #${event.seq}`);
-    aksi.addEventListener("click", () => appendKoreksi(target, "#utang-error"));
-
-    li.append(seq, isi, aksi);
-    riwayat.append(li);
-  }
-}
-
-/**
- * Record a loan. The score is not touched, here or anywhere downstream of it.
- *
- * The borrower and lender lists are both complete and the rule is checked on submit
- * rather than enforced by filtering the second list. Filtering would make the
- * invalid choice unreachable and with it the message — and a table where a player
- * taps the wrong name needs the record to say what the rule is, not a list that
- * quietly moved.
- */
-function submitUtang(ev) {
-  ev.preventDefault();
-  const borrowerId = $("#utang-borrower").value;
-  const lenderId = $("#utang-lender").value;
-  const amount = Number($("#utang-amount").value);
-  const note = $("#utang-note").value.trim();
-
-  if (borrowerId === lenderId) return setUtangError("Peminjam dan pemberi harus pemain yang berbeda.");
-  if (!Number.isInteger(amount) || amount <= 0) {
-    return setUtangError("Jumlah harus bilangan bulat lebih dari 0.");
-  }
-
-  const event = { type: "utang", borrowerId, lenderId, amount };
-  if (note !== "") event.note = note;
-  try {
-    store.append(event);
-  } catch (e) {
-    // Stay on the view and say so. An append that threw recorded nothing, so
-    // clearing the form here would read as success and lose the loan silently.
-    return setUtangError(e.message);
-  }
-
-  // The two selects keep their values: a table usually borrows more than once, and
-  // re-picking the same pair is the common case. The amount and the note do not —
-  // a loan's amount is the one field that must never be carried over.
-  $("#utang-amount").value = "";
-  $("#utang-note").value = "";
-  setUtangError(null);
-  render();
-}
-
-// ── selesai — hasil, utang, transfer akhir ───────────────────────────────────
+// What each player won at the table, rendered straight from `scoresFrom` — nothing
+// here is arithmetic (C1).
 //
-// Three blocks, one question. They share a screen because none of them is readable
-// alone: a net of +150 beside a loan of 200 is a player who still owes 50, and only
-// the balance knows that. `skor` says what each player won, `utang` says what each
-// player borrowed, and this is the only screen that puts the two together into the
-// list of payments that actually ends the night.
-//
-// Nothing here is arithmetic (C1). The net comes from `scoresFrom`, the loans from
-// `loanTotals`, the balances from `balancesFrom`, and the transfers are `settleUp`'s
-// own array rendered in its own order — this view does not shorten the list, merge
-// two payments, or re-sort it, so what is on screen is what the engine computed.
+// Two blocks used to sit above the archive door: the loan ledger, and the transfer
+// list that ended the night. SPEC 3 removed both, so the heading inside carries no
+// numeral — one section is not a sequence.
 
 function renderSelesai() {
   const { players, events, start } = store.state();
   const scores = scoresFrom(events, players, start);
-  // The *settlement* balance, not the game net: `balancesFrom` folds every loan in,
-  // which is what makes the transfer list below the one that squares the table.
-  const balances = balancesFrom(events, players, start);
-  const totals = loanTotals(events, players);
-  const transfers = settleUp(balances);
   const roster = [...players].sort(windOrder);
-  const nama = (id) => players.find((p) => p.id === id)?.name ?? "—";
   const kosong = events.length === 0;
 
-  // ── 1. Hasil permainan — what each player won at the table ─────────────────
+  // ── Hasil permainan — what each player won at the table ────────────────────
   const hasil = $("#selesai-hasil");
   hasil.replaceChildren();
   for (const p of roster) {
@@ -530,56 +344,6 @@ function renderSelesai() {
     li.append(n, s, net);
     hasil.append(li);
   }
-
-  // ── 2. Utang — what each player borrowed and lent ──────────────────────────
-  // One row per player carrying both figures, from the same `loanTotals` call the
-  // ledger makes: the two screens are two renderings of one fact, and two sums of it
-  // would be two chances to disagree. Σ dipinjam === Σ dipinjamkan holds by the same
-  // construction it does there — every loan adds to both sides at once.
-  const utang = $("#selesai-utang");
-  utang.replaceChildren();
-  let adaUtang = false;
-  for (const p of roster) {
-    const t = totals.get(p.id) ?? { borrowed: 0, lent: 0 };
-    if (t.borrowed > 0 || t.lent > 0) adaUtang = true;
-
-    const li = document.createElement("li");
-    li.className = "utang-baris";
-    const n = document.createElement("span");
-    n.className = "utang-nama";
-    n.textContent = p.name;
-    const a = document.createElement("span");
-    a.className = "utang-angka";
-    a.textContent = `meminjam ${fmt(t.borrowed)} · meminjamkan ${fmt(t.lent)}`;
-    li.append(n, a);
-    utang.append(li);
-  }
-  utang.hidden = !adaUtang;
-  // Suppressed when the whole log is empty: the invitation at the foot of the screen
-  // already says nothing has happened, and a second "nothing here" above it reads as
-  // two different facts rather than one.
-  $("#selesai-utang-kosong").hidden = adaUtang || kosong;
-
-  // ── 3. Transfer akhir — who pays whom, in as few movements as possible ─────
-  const list = $("#selesai-transfer");
-  list.replaceChildren();
-  for (const t of transfers) {
-    const li = document.createElement("li");
-    li.className = "transfer-baris";
-    // The arrow is directional data, not decoration — SPEC.md's one permitted `→`.
-    li.textContent = `${nama(t.from)} → ${nama(t.to)}: ${fmt(t.amount)} poin`;
-    list.append(li);
-  }
-
-  // The count is the list's own length; the bound is `n − 1`, which is what the
-  // greedy pass guarantees. Printed only while it holds: a bound shown beside a list
-  // that broke it would be the screen lying about the arithmetic, and this view is
-  // the one place that must not.
-  const batas = players.length > 0 ? players.length - 1 : 0;
-  $("#selesai-jumlah").textContent = fmt(transfers.length);
-  const elBatas = $("#selesai-batas");
-  elBatas.hidden = !(players.length > 0 && transfers.length <= batas);
-  elBatas.textContent = `· ≤ ${fmt(batas)} transfer`;
 
   $("#selesai-kosong").hidden = !kosong;
 
@@ -1409,7 +1173,6 @@ function wire() {
   });
   $("#btn-setup").addEventListener("click", openSetup);
   $("#setup-form").addEventListener("submit", submitSetup);
-  $("#utang-form").addEventListener("submit", submitUtang);
 
   $("#io-export").addEventListener("click", doExport);
   $("#io-import").addEventListener("click", () => {
@@ -1429,13 +1192,12 @@ function wire() {
   $("#reset-batal").addEventListener("click", closeResetConfirm);
 
   // A refusal explains the state the form was in when it was refused, so it stops
-  // being true the moment the player edits the form — measured: after "Peminjam dan
-  // pemberi harus pemain yang berbeda" the message was still up while a new amount
-  // was being typed, describing a state already left behind. Delegated, so every
-  // field clears it without the setter having to be wired per input.
+  // being true the moment the player edits the form: "Isi nama keempat pemain." is
+  // still up while the fourth name is being typed, describing a state already left
+  // behind. Delegated, so every field clears it without the setter having to be wired
+  // per input.
   for (const [form, clear] of [
     [$("#setup-form"), () => setSetupError(null)],
-    [$("#utang-form"), () => setUtangError(null)],
   ]) {
     form.addEventListener("input", clear);
     form.addEventListener("change", clear);

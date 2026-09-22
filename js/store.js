@@ -407,9 +407,17 @@ export function createStore({ storage, now = () => Date.now(), id = makeId } = {
     // The referential-integrity loop below checks each `*Id` against the roster; a
     // loan needs one more thing of the same kind, because its two ids have to name
     // **two** players and not one. A self-loan is not malformed — every field is
-    // present and every id is real — it is a row the ledger cannot express, and
-    // `loanTotals` would throw on it during render, which is the blank screen with
-    // no banner that Tasks 7, 8 and 9 each closed for a different table.
+    // present and every id is real — it is a row the ledger cannot express.
+    //
+    // This comment used to say that `balancesFrom` would throw on it during render
+    // and blank the screen. **That is no longer true, and it is worth being exact
+    // about why the door still earns its place.** SPEC 3 removed the ledger, and with
+    // it the app's only calls into the loan arithmetic: `balancesFrom`, `settleUp` and
+    // `utangLegs` are exported and tested but reached by nothing the app ships. So a
+    // self-loan in the log would now be refused by arithmetic that never runs — it
+    // would sit there silently, pricing nothing, on a screen that lists every row it
+    // can. The door is the only guard left, and it is the right one anyway: the log is
+    // append-only and cannot be pruned, so keeping the row out is the only fix.
     //
     // Guarded on `typeof ... === "string"` so a row *missing* an id falls through
     // to settle.js's field rule rather than being reported as a self-loan. The

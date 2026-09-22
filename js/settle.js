@@ -262,29 +262,6 @@ export function balancesFrom(events, players, start) {
 }
 
 /**
- * What each player has taken and lent, as `Map<id, {borrowed, lent}>`.
- *
- * The two numbers `balancesFrom` collapses into one. The ledger view needs them
- * apart, because "meminjam 200" and "meminjamkan 200" are different facts about a
- * table, and their sums are the fifth zero-sum surface — Σ borrowed === Σ lent
- * always, since every loan adds to both sides at once.
- *
- * A cancelled loan is not a loan: this walks `resolveEvents`, like every other
- * reader of the log, so undoing one takes it off both totals.
- */
-export function loanTotals(events, players) {
-  const ids = playerIds(players);
-  const totals = new Map(ids.map((id) => [id, { borrowed: 0, lent: 0 }]));
-  for (const event of resolveEvents(events)) {
-    if (event.type !== "utang") continue;
-    const { borrower, lender, amount } = utangLegs(event, ids);
-    totals.get(borrower).borrowed += amount;
-    totals.get(lender).lent += amount;
-  }
-  return totals;
-}
-
-/**
  * Who pays whom, to clear the table in as few transfers as possible.
  * Greedy: the largest debtor pays the largest creditor, repeatedly. Each
  * iteration zeroes at least one player, so the result is never longer than
