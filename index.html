@@ -235,7 +235,7 @@
     <!-- Task 21. Static, and always visible — it is the one thing on this screen that
          does not depend on the log. Its own class rather than `.empty`, because it is
          an offer, not an empty state. -->
-    <p class="selesai-kredit">Butuh pencatat skor sendiri? Tanya CK (93)</p>
+    <p class="selesai-kredit">oleh CK (93)</p>
   </section>
 </main>
 
@@ -250,7 +250,7 @@
      a fifth grid cell in `repeat(4, 1fr)` and the four nav buttons shrink to make room.
      Static text, so it is not a <button> and carries no role — nothing taps it, so the
      44px target minimum does not apply. -->
-<p class="kredit">Tanya CK (93)</p>
+<p class="kredit">oleh CK (93)</p>
 
 <div id="scrim" class="scrim" hidden></div>
 
@@ -471,6 +471,21 @@
       </div>
     </div>
   </div>
+</section>
+
+<!-- The notice, last in document order on purpose. Every sheet shares `z-index: 11`,
+     so if two are ever un-hidden at once the later one paints on top — and the safer
+     failure is the notice winning over the setup form, not the reverse.
+     Two `<p>` elements rather than one with a `<br>`: they are two claims, and a
+     screen reader should pause between them. The order is load-bearing and mirrors
+     what the app is before what the law forbids — reversed, the first word a reader
+     meets is "Perjudian" attached to an app they just installed to keep score.
+     There is no dismiss control: declining means not using the app. -->
+<section id="disclaimer" class="sheet sheet-disclaimer" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title" hidden>
+  <h2 id="disclaimer-title">Sebelum mulai</h2>
+  <p class="disclaimer-teks">Aplikasi ini hanya alat bantu mencatat skor poin. Tidak ada uang, taruhan, atau transaksi.</p>
+  <p class="disclaimer-teks">Perjudian dilarang oleh peraturan perundang-undangan yang berlaku di Indonesia.</p>
+  <button type="button" class="sheet-btn utama" id="disclaimer-mengerti">Mengerti</button>
 </section>
 
 <script type="module" src="js/ui.js"></script>

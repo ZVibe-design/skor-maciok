@@ -14,6 +14,17 @@ export const STORAGE_KEY = "zv-mj-chan.game.v1";
 export const STATE_VERSION = 1;
 
 /**
+ * The first-open notice's acknowledgment — a **device** fact, not game state.
+ *
+ * Its own key, deliberately: it is not in the log, not in the archive, not in an
+ * export, and `STATE_VERSION` is untouched by it. An export carries a game, and
+ * whether this phone has read a notice is not part of a game. `.v1` so that a
+ * material change to the notice's wording can be shipped as `.v2` and will be
+ * shown again, without either version having to interpret the other.
+ */
+export const DISCLAIMER_KEY = "zv-mj-chan.disclaimer.v1";
+
+/**
  * Reset's archive (LAW 5: expiry = archive, not delete). One entry per reset,
  * newest first, capped at `ARCHIVE_MAX`.
  *
@@ -113,6 +124,41 @@ function resolveStorage(supplied) {
   } catch {
     // Some sandboxed contexts throw on the property access itself.
     return null;
+  }
+}
+
+/**
+ * Has this device acknowledged the notice? **Absent, unreadable and unrecognised
+ * all mean "not yet acknowledged"** — the notice is the safe default, so every
+ * failure mode resolves toward showing it rather than skipping it.
+ *
+ * `!== "1"` rather than a truthiness test because a legacy or hand-edited value
+ * like `"true"` or `"0"` is not an acknowledgment, and reading it as one would
+ * skip the only notice the app has.
+ */
+export function disclaimerAcked(storage) {
+  const s = resolveStorage(storage);
+  if (!s) return false;
+  try {
+    return s.getItem(DISCLAIMER_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Record the acknowledgment. Writing **cannot throw**: a quota-full storage, or
+ * Safari's private mode, must not turn the notice into an app that will not open.
+ * A failed write is not retried and not reported — the consequence is that the
+ * notice is shown again next time, which is the correct failure.
+ */
+export function ackDisclaimer(storage) {
+  const s = resolveStorage(storage);
+  if (!s) return;
+  try {
+    s.setItem(DISCLAIMER_KEY, "1");
+  } catch {
+    // Nothing readable to write to. The notice simply reappears.
   }
 }
 

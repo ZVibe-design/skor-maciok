@@ -682,11 +682,14 @@ body[data-view="selesai"] #view-selesai { display: flex; }
    is a statement about the list rather than a payment in it. */
 .selesai-ringkas { margin: 0; font-size: .8rem; color: var(--redup); }
 .selesai-ringkas .angka { color: var(--tile); font-weight: 800; }
-/* Task 21's second string, at the foot of the screen. A hairline rule rather than a
+/* The maker credit at the foot of the screen. A hairline rule rather than a
    box, for the same reason `.pasang` uses one: a filled, bordered rectangle is a card,
    and a card is what made this app read as a dashboard. It sits below `#selesai-kosong`
-   so it survives an empty log — the offer is most relevant to someone who has nothing
-   recorded yet. */
+   so it survives an empty log — attribution is not conditional on the log having
+   content. T27 reviewed all five declarations when it replaced the sentence this rule
+   was written for: none existed to fit the longer text (no `max-width`, no fixed height,
+   no reduced font — `.875rem` is this file's standing secondary size), so none was
+   removed. The rule is structural, not copy-shaped. */
 .selesai-kredit {
   margin: 16px 0 0;
   padding-top: 12px;
@@ -798,6 +801,22 @@ body[data-view="selesai"] #view-selesai { display: flex; }
 .sheet-btn.batal { background: none; color: var(--redup); }
 
 .sheet-setup h2 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; }
+
+/* The notice. Its heading mirrors `.sheet-setup h2`'s three values verbatim — the
+   notice is the same kind of screen as setup, and a second heading treatment would
+   make it look like a different class of thing (an alert), which is exactly what it
+   is not: it describes the instrument, it does not characterize the game.
+   Both sentences sit at the same weight on purpose. A hierarchy would either bury
+   the prohibition or shout it, and the purpose-first order already carries the
+   emphasis; `--redup` here would be the app visually softening a legal notice.
+   The button takes 8px on top of the sheet's own 8px `gap`, because a bordered
+   control needs less clearance than an unbounded text block: at the uniform 8px,
+   `Mengerti` reads as a third line of the notice rather than its exit. */
+.sheet-disclaimer h2 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; }
+
+.disclaimer-teks { margin: 0; font-size: .9rem; line-height: 1.5; color: var(--tile); }
+
+.sheet-disclaimer .sheet-btn { margin-top: 8px; }
 
 .peserta {
   display: grid;

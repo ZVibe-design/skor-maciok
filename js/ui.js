@@ -6,7 +6,7 @@
 // which stops being true the moment a score is computed here.
 
 import { DEFAULT_START, FU_FLOOR_CITE, FU_FLOOR_TAY, HU_METHODS, KOIN, MAX_ENTRY, MIN_FU_TAY, PENALTY_ROWS, PING_FU_CITE, PING_FU_REMINDER } from "./rules.js";
-import { ARCHIVE_MAX, SEATS, store, validStart } from "./store.js";
+import { ARCHIVE_MAX, SEATS, ackDisclaimer, disclaimerAcked, store, validStart } from "./store.js";
 import { applyFuFloor, balancesFrom, cancellations, loanTotals, scoresFrom, settleUp, transfersFor } from "./settle.js";
 import { EXPORT_MESSAGES, IMPORT_MESSAGES, ImportError, exportGame, importGame } from "./io.js";
 
@@ -829,12 +829,39 @@ function closeSheets() {
 }
 
 /**
- * One scrim is shared by four overlays — first-run setup, the action sheet, the Hu
- * flow and the penalty flow. It is dismissed only when the last of them has gone, so
- * handing over from one to the next never flashes the table through.
+ * The notice has one exit, and it is `Mengerti` — no scrim tap, no Escape, no
+ * back-out. Acknowledging is not a preference the app offers; it is the condition
+ * for the app being the kind of app it says it is.
+ *
+ * The ack is written **first**, so a throw out of `openSetup` cannot leave a player
+ * who has read the notice facing it again on the next open — the acknowledgment is
+ * about this device, and it is true the moment it is given.
+ *
+ * The branch is not "open setup": a complete table is a player who has already
+ * started, and they should land on their game rather than on a roster they filled
+ * in weeks ago. That case is reachable by clearing site data on a phone mid-game.
+ */
+function ackAndContinue() {
+  ackDisclaimer();
+  hide($("#disclaimer"));
+  if (store.state().players.length !== SEATS.length) openSetup();
+  else hideScrimIfClear();
+}
+
+/**
+ * One scrim is shared by five overlays — first-run setup, the action sheet, the Hu
+ * flow, the penalty flow and the first-open notice. It is dismissed only when the
+ * last of them has gone, so handing over from one to the next never flashes the
+ * table through.
+ *
+ * The notice is in this condition even though it is the one overlay that cannot be
+ * dismissed by a scrim tap: this is the app's statement of *when every overlay is
+ * shut*, and a fifth overlay the condition did not know about would make that
+ * statement false. The failure it produces is a notice floating over an undimmed
+ * table.
  */
 function hideScrimIfClear() {
-  if ($("#setup").hidden && $("#sheet").hidden && $("#hu").hidden && $("#penalti").hidden && $("#koin").hidden) hide($("#scrim"));
+  if ($("#setup").hidden && $("#sheet").hidden && $("#hu").hidden && $("#penalti").hidden && $("#koin").hidden && $("#disclaimer").hidden) hide($("#scrim"));
 }
 
 // ── hu — method → (discarder) → tay → preview → commit ───────────────────────
@@ -1368,7 +1395,13 @@ function wire() {
   $("#koin-commit").addEventListener("click", commitKoin);
   for (const b of $$("[data-koin-cancel]")) b.addEventListener("click", closeKoin);
 
+  $("#disclaimer-mengerti").addEventListener("click", ackAndContinue);
+
   $("#scrim").addEventListener("click", () => {
+    // First, and ahead of every other check: the notice is the one overlay a scrim
+    // tap may not dismiss, and a dismissal that skips the acknowledgment defeats
+    // the acknowledgment.
+    if (!$("#disclaimer").hidden) return;
     if (hu) return closeHu();
     if (penalti) return closePenalti();
     if (koin) return closeKoin();
@@ -1410,8 +1443,11 @@ function wire() {
 
   document.addEventListener("keydown", (e) => {
     // Escape closes the sheets you can back out of. It must NOT close first-run
-    // setup: there is no table behind it until four players exist.
+    // setup: there is no table behind it until four players exist. The notice shares
+    // that exclusion and for the same reason — there is nothing behind it either,
+    // and an unacknowledged notice is not a state the app offers a way out of.
     if (e.key !== "Escape") return;
+    if (!$("#disclaimer").hidden) return;
     if (hu) return closeHu();
     if (penalti) return closePenalti();
     if (koin) return closeKoin();
@@ -1422,6 +1458,15 @@ function wire() {
 function init() {
   wire();
   render();
+  // The notice comes before setup and instead of it: one sheet at a time over one
+  // shared scrim. A player who has not read it has not started.
+  //
+  // `return` rather than falling through — setup must not be opened behind the
+  // notice, or `Mengerti` would be answering a question the player was never asked.
+  if (!disclaimerAcked()) {
+    show($("#disclaimer"), $("#scrim"));
+    return;
+  }
   // First run, or a table that never finished setup. The sheet sits over `meja`,
   // so the diamond is visible behind it as the thing being configured.
   if (store.state().players.length !== SEATS.length) openSetup();
