@@ -198,9 +198,44 @@
          the list is short enough to read at a table; it is hidden rather than
          falsified if a list ever came back longer. -->
     <p class="selesai-ringkas"><span class="angka" id="selesai-jumlah">0</span> transfer <span class="selesai-batas" id="selesai-batas" hidden></span></p>
+
+    <!-- LAW 5's archive door. Below the last figure of the settlement and above the
+         empty state, so it is the last thing read on a screen whose job is squaring
+         up — findable without sitting in that reading path. `.arsip`'s own top rule
+         does the separating; this screen has four blocks of numbers already carrying
+         its structure, and a heading here would be a fifth label for one button.
+         Hidden while the log is empty (`renderSelesai`): an empty table has nothing
+         to archive, and the control would sit above "Belum ada catatan" offering to
+         replace nothing.
+
+         The button is a direct child, **not** inside `.arsip-tombol`. That class
+         restyles `.link-btn` into a bordered box in `--tile` (see the Impor pair);
+         SPEC 2 §1 pins this one quiet and `--redup`, and an underlined link is the
+         treatment it names. Same class as Impor, different wrapper, deliberately. -->
+    <div class="arsip" id="selesai-arsip">
+      <p class="arsip-catatan">Catatan yang ada sekarang disimpan ke arsip, lalu meja dikosongkan. Nama pemain dan nilai awal tetap.</p>
+      <button type="button" class="link-btn" id="selesai-reset">Permainan baru</button>
+
+      <!-- The confirm, in the block rather than `window.confirm` — same reasoning as
+           `#io-konfirmasi`, and the same three classes. Its text is built in ui.js
+           from the live log, so it can never name a table other than the one on
+           screen. -->
+      <div class="arsip-konfirmasi" id="reset-konfirmasi" hidden>
+        <p class="arsip-tanya" id="reset-tanya" role="alert"></p>
+        <div class="arsip-tombol">
+          <button type="button" class="sheet-btn utama" id="reset-ya">Ya, arsipkan</button>
+          <button type="button" class="sheet-btn batal" id="reset-batal">Batal</button>
+        </div>
+      </div>
+      <p class="error" id="reset-error" role="alert" hidden></p>
+    </div>
     <!-- SPEC.md rule 7 — empty is an invitation, not an error. Keys on the log, so
          a settled table with a night of hands behind it is never called empty. -->
     <p class="empty" id="selesai-kosong">Belum ada catatan. Ketuk nama pemain untuk mulai.</p>
+    <!-- Task 21. Static, and always visible — it is the one thing on this screen that
+         does not depend on the log. Its own class rather than `.empty`, because it is
+         an offer, not an empty state. -->
+    <p class="selesai-kredit">Butuh pencatat skor sendiri? Tanya CK (93)</p>
   </section>
 </main>
 
@@ -210,6 +245,12 @@
   <button type="button" data-goto="utang" aria-current="false">Utang</button>
   <button type="button" data-goto="selesai" aria-current="false">Selesai</button>
 </nav>
+
+<!-- Task 21. A SIBLING of <nav class="tabbar">, never a child: inside it this becomes
+     a fifth grid cell in `repeat(4, 1fr)` and the four nav buttons shrink to make room.
+     Static text, so it is not a <button> and carries no role — nothing taps it, so the
+     44px target minimum does not apply. -->
+<p class="kredit">Tanya CK (93)</p>
 
 <div id="scrim" class="scrim" hidden></div>
 
@@ -271,22 +312,49 @@
   <button type="button" class="sheet-btn batal" data-hu-cancel>Batal</button>
 </section>
 
-<!-- ── penalti — pick a YDSP row, then Catat. Every row v1 offers is a Lew Fit, so
-     there is no number to type and no number pad here: a pad with nothing to enter
-     would be a second screen of UI standing behind a dead branch. Row labels and
-     citations render from `PENALTY_ROWS` in rules.js; no rule number is written in
-     this file. -->
+<!-- ── penalti — pick a YDSP row, then Catat. Rows 2–4 are Lew Fit: a restriction
+     the app records but cannot enforce, so there is no number to type and no pad is
+     shown for them. Rows 5 and 6 are the exception — YDSP states their consequence
+     ("Pemain yang buang bayar semua") but no amount, so the offender's fine is typed
+     per incident and `#penalti-fine` appears. Row labels and citations render from
+     `PENALTY_ROWS` in rules.js; no rule number is written in this file. -->
 <section id="penalti" class="sheet sheet-penalti" role="dialog" aria-modal="true" aria-labelledby="penalti-title" hidden>
   <h2 id="penalti-title">Penalti — <span id="penalti-who"></span></h2>
 
   <p class="hu-label">Jenis</p>
   <div class="hu-list" id="penalti-rows"></div>
 
-  <!-- The limitation, on screen as Task 7 requires. Lew Fit is recorded and nothing
-       else: the app does not know whose turn it is, so it cannot enforce a
-       restriction, and a UI that greyed a player out would be enforcing a rule it
-       cannot see. Copy, not a rule number, so it lives here rather than in rules.js. -->
-  <p class="hu-reminder">Hanya dicatat. Aplikasi tidak mengunci permainan atau membatasi pemain.</p>
+  <!-- Shown only once a `point` row (5 or 6) is picked. The markup mirrors
+       `#hu-keypad` exactly — same classes, same `data-key` values, same ⌫ — so the
+       two pads read as one control to the player. The two digit caps are separate
+       constants in ui.js (`MAX_ENTRY_DIGITS` here, `MAX_TAY_DIGITS` for the Hu pad),
+       both derived from `MAX_ENTRY`; no cap is written in this file. -->
+  <div id="penalti-fine" hidden>
+    <p class="hu-label">Denda</p>
+    <p class="hu-tay"><span class="hu-tay-num" id="penalti-fine-nilai">—</span> <span class="hu-tay-unit">poin</span></p>
+    <div class="keypad" id="penalti-keypad">
+      <button type="button" class="key" data-key="1">1</button>
+      <button type="button" class="key" data-key="2">2</button>
+      <button type="button" class="key" data-key="3">3</button>
+      <button type="button" class="key" data-key="4">4</button>
+      <button type="button" class="key" data-key="5">5</button>
+      <button type="button" class="key" data-key="6">6</button>
+      <button type="button" class="key" data-key="7">7</button>
+      <button type="button" class="key" data-key="8">8</button>
+      <button type="button" class="key" data-key="9">9</button>
+      <button type="button" class="key" data-key="back" aria-label="Hapus satu angka">⌫</button>
+      <button type="button" class="key span2" data-key="0">0</button>
+    </div>
+  </div>
+
+  <!-- The limitation, on screen as Task 7 requires — for a `lewFit` row, and only for
+       one. The app does not know whose turn it is, so it cannot enforce a restriction,
+       and a UI that greyed a player out would be enforcing a rule it cannot see.
+       The second sentence covers the `point` rows, which do move points: the first
+       sentence alone read as "nothing happens", which is false for rows 5 and 6 and
+       would have the offender read a balance that disagreed with what they were told
+       here. Copy, not a rule number, so it lives here rather than in rules.js. -->
+  <p class="hu-reminder">Lew Fit hanya dicatat — aplikasi tidak mengunci permainan atau membatasi pemain. Baris denda menggerakkan poin dari pelanggar ke tiap pemain lain.</p>
 
   <p class="error" id="penalti-error" role="alert" hidden></p>
   <button type="button" class="sheet-btn utama" id="penalti-commit" disabled>Catat</button>

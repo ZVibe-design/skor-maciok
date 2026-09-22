@@ -5,8 +5,8 @@
 // correction from the field test has to cost settle.js plus an `npm test` re-run,
 // which stops being true the moment a score is computed here.
 
-import { DEFAULT_START, FU_FLOOR_CITE, FU_FLOOR_TAY, HU_METHODS, KOIN, MIN_FU_TAY, PENALTY_ROWS, PING_FU_CITE, PING_FU_REMINDER } from "./rules.js";
-import { SEATS, store } from "./store.js";
+import { DEFAULT_START, FU_FLOOR_CITE, FU_FLOOR_TAY, HU_METHODS, KOIN, MAX_ENTRY, MIN_FU_TAY, PENALTY_ROWS, PING_FU_CITE, PING_FU_REMINDER } from "./rules.js";
+import { ARCHIVE_MAX, SEATS, store, validStart } from "./store.js";
 import { applyFuFloor, balancesFrom, cancellations, loanTotals, scoresFrom, settleUp, transfersFor } from "./settle.js";
 import { EXPORT_MESSAGES, IMPORT_MESSAGES, ImportError, exportGame, importGame } from "./io.js";
 
@@ -21,8 +21,25 @@ const SEAT_LABEL = { tung: "Tung", nan: "Nan", si: "Si", pei: "Pei" };
  */
 const windOrder = (a, b) => SEATS.indexOf(a.seat) - SEATS.indexOf(b.seat);
 
-/** Six digits is 999999 tay — past any real hand, and short of a runaway entry. */
-const MAX_TAY_DIGITS = 6;
+/**
+ * How many digits the Hu keypad accepts, derived from the ceiling rather than written
+ * as a second literal. It read `6` — 999999 tay, past any real hand — until Task 22 set
+ * the ceiling at `MAX_ENTRY`, which made the six wrong by exactly the bound it was
+ * standing in for: a pad admitting a fifth digit offers a number `store.validate`
+ * refuses, so the player types it, taps Catat, and reads a rejection for a value the
+ * app handed them the keys to.
+ */
+const MAX_TAY_DIGITS = String(MAX_ENTRY).length;
+
+/**
+ * How many digits the Penalti keypad accepts, derived from the ceiling itself
+ * rather than written as a second literal. The pad and the door have to agree:
+ * a pad that admits a fifth digit offers a number `store.validate` refuses, so
+ * the player types it, taps Catat, and reads a rejection for a value the app
+ * handed them the keys to. The Hu pad's cap above is derived from the same
+ * constant for the same reason.
+ */
+const MAX_ENTRY_DIGITS = String(MAX_ENTRY).length;
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -565,6 +582,81 @@ function renderSelesai() {
   elBatas.textContent = `· ≤ ${fmt(batas)} transfer`;
 
   $("#selesai-kosong").hidden = !kosong;
+
+  // The archive door, hidden with the log it would archive. SPEC 2 §1 hides "the
+  // control"; the whole block goes, because the sentence above the button describes
+  // what archiving does and would otherwise describe an act that cannot be taken,
+  // directly over "Belum ada catatan" and saying the same thing twice.
+  $("#selesai-arsip").hidden = kosong;
+  // An open confirm is dropped on every render, because its sentence counts the live
+  // log and stops being true the moment an event lands. A confirm still naming 12
+  // catatan over a log of 13 is the app asking about a table that no longer exists.
+  closeResetConfirm();
+}
+
+// ── reset — the archive door in `#view-selesai` ──────────────────────────────
+
+function setResetError(msg) {
+  const el = $("#reset-error");
+  el.hidden = !msg;
+  el.textContent = msg ?? "";
+}
+
+/**
+ * What the confirm says, counted off the live log at the moment it is asked — the
+ * same rule `ioLossText` follows, and for the same reason: a sentence built here can
+ * never describe a table other than the one on screen.
+ */
+function resetConfirmText() {
+  const { events, players } = store.state();
+  const text = `Arsipkan ${fmt(events.length)} catatan dari ${fmt(players.length)} pemain, lalu mulai permainan baru?`;
+  // At the cap every further reset silently drops the oldest entry, so the confirm
+  // says so *before* the tap. 21 resets in one night is plausible on this app's own
+  // premise — one phone, four players, no server — and an unannounced truncation
+  // satisfies LAW 5's "expiry = archive, not delete" only until the 21st reset.
+  return store.archive().length >= ARCHIVE_MAX
+    ? `${text} Arsip penuh — permainan terlama akan dihapus.`
+    : text;
+}
+
+function openResetConfirm() {
+  setResetError(null);
+  $("#reset-tanya").textContent = resetConfirmText();
+  const box = $("#reset-konfirmasi");
+  box.hidden = false;
+  // The confirm lands at the tail of a stack that can outgrow the column, and
+  // `#view-selesai` scrolls rather than pushes — so on a 664px-tall phone the two
+  // buttons opened 32px behind the fixed tabbar. A confirm the player has to go
+  // looking for is not a confirm; bring it into the scroll viewport on open.
+  // `nearest` scrolls the minimum, so a confirm already fully visible stays put.
+  box.scrollIntoView({ block: "nearest" });
+}
+
+function closeResetConfirm() {
+  $("#reset-konfirmasi").hidden = true;
+  $("#reset-tanya").textContent = "";
+}
+
+/**
+ * The confirmed reset. The refusal is already a Bahasa sentence — `ARCHIVE_MESSAGES`
+ * or a storage message — so it is shown as-is, the same contract `confirmImport`
+ * has, minus the `ImportError` wrapper because there is no file to report on.
+ */
+function commitReset() {
+  closeResetConfirm();
+  try {
+    store.archiveReset();
+  } catch (e) {
+    setResetError(e.message);
+    render();
+    return;
+  }
+  setResetError(null);
+  render();
+  // A reset leaves the player on Selesai showing "Belum ada catatan. Ketuk nama
+  // pemain untuk mulai." — an invitation to a tap this screen cannot receive. The
+  // next act of a new game happens on the table, so the table is where it lands.
+  setView("meja");
 }
 
 // ── setup — a first-run sheet over meja, not a fifth view ────────────────────
@@ -602,7 +694,7 @@ function submitSetup(ev) {
 
   if (names.some((n) => n === "")) return setSetupError("Isi nama keempat pemain.");
   if (new Set(seats).size !== SEATS.length) return setSetupError("Setiap pemain harus dapat kursi yang berbeda.");
-  if (!Number.isInteger(start) || start < 0) return setSetupError("Modal awal harus bilangan bulat 0 atau lebih.");
+  if (!validStart(start)) return setSetupError(`Modal awal harus bilangan bulat 0–${MAX_ENTRY}.`);
 
   try {
     // Ids are carried over by position, so re-running setup to fix a typo does not
@@ -882,7 +974,7 @@ function renderHuTay() {
 
   // The tay step names what is being recorded. The preview cannot do this job for
   // the five self-draw methods: they collapse to one identical string, so without
-  // this line a tap on Thien Fu looks exactly like a tap on Pyong Pi and the
+  // this line a tap on Thien Hu looks exactly like a tap on Pyong Pi and the
   // player has nothing to confirm the method registered. Rendered from
   // HU_METHODS like every other label, never restated here.
   let metode = method.label;
@@ -984,18 +1076,32 @@ function commitHu() {
 
 // ── penalti — pick a YDSP row, then Catat ────────────────────────────────────
 //
-// Every row v1 offers is a Lew Fit, which moves no points, so this flow has no
-// number pad and no preview: `settle.js` prices it at zero and the row itself is
-// the whole record. The rows that *do* move points are already priced elsewhere —
-// see `PENALTY_EXCLUDED` for which, and why — so a pad here would be a second way
-// to charge a player for the same thing.
+// Two kinds of row, and which one is picked decides the rest of the flow. A
+// `lewFit` row moves nothing: `settle.js` prices it at zero and the row itself is
+// the whole record, so there is no number to type and no pad. A `point` row (rows
+// 5 and 6) makes the offender pay a fine to each other player, and YDSP states no
+// amount for either — so the amount is typed per incident, and the pad is the
+// mechanism, exactly as the Hu flow's tay pad is. The rows that are already priced
+// elsewhere are not offered at all; see `PENALTY_EXCLUDED` for which, and why.
 
 /** The row picked in the open flow, or null. */
 let penalti = null;
 
+/** The typed fine as a positive integer, or null while it is not one yet. */
+function penaltiFine() {
+  if (!penalti || penalti.digits === "") return null;
+  const n = Number(penalti.digits);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
 function penaltiEvent() {
   if (!penalti) return null;
-  return { type: "penalty", kind: penalti.kind, row: penalti.row, offenderId: penalti.offenderId };
+  const event = { type: "penalty", kind: penalti.kind, row: penalti.row, offenderId: penalti.offenderId };
+  // `fine` travels only on a `point` row. A `lewFit` event carrying one would be a
+  // field nothing prices — `settle.js` reads `fine` on the point branch alone — and
+  // the log is append-only, so a meaningless field on a real row is permanent.
+  if (penalti.kind === "point") event.fine = penaltiFine();
+  return event;
 }
 
 function renderPenaltiRows() {
@@ -1024,12 +1130,49 @@ function renderPenaltiRows() {
   }
 }
 
+/**
+ * The typed amount and the Catat button, in one place.
+ *
+ * Both are decided by the same question — is this row recordable yet? — so they
+ * are rendered together. Splitting them is how a `point` row ends up with a fine
+ * on screen and an enabled button, or the reverse: a pad the player can type into
+ * while Catat stays shut with nothing saying why.
+ */
+function renderPenaltiFine() {
+  const fine = penaltiFine();
+  $("#penalti-fine-nilai").textContent = penalti?.digits === "" || penalti?.digits == null ? "—" : penalti.digits;
+  // Three states, one expression: nothing picked yet is shut, a `lewFit` row needs no
+  // amount and opens immediately, and a `point` row waits for a typed one. Rendered
+  // from the `null` rather than from the digit string, so a lone `0` keeps Catat shut
+  // — it is not a fine, and the door refuses it too.
+  $("#penalti-commit").disabled = !penalti || penalti.row === null || (penalti.kind === "point" && fine === null);
+}
+
 function pickPenaltiRow(row) {
-  penalti = { offenderId: penalti.offenderId, row: row.no, kind: row.kind };
+  // `digits` is reset on every pick, including point → point. The amount belongs to
+  // the row that was picked, so carrying one across a row change would pre-fill the
+  // next penalty with the last one's number and leave it looking already answered.
+  penalti = { offenderId: penalti.offenderId, row: row.no, kind: row.kind, digits: "" };
   for (const b of $$("#penalti-rows [data-penalti-row]")) {
     b.setAttribute("aria-pressed", String(b.dataset.penaltiRow === String(row.no)));
   }
-  $("#penalti-commit").disabled = false;
+  // The pad appears only where there is a number to type. A `lewFit` row showing an
+  // amount field would ask for something the row has no use for, and — because the
+  // row moves nothing — the number would never appear in any balance afterwards.
+  $("#penalti-fine").hidden = row.kind !== "point";
+  renderPenaltiFine();
+}
+
+function pressPenaltiKey(key) {
+  if (!penalti) return;
+  if (key === "back") {
+    penalti.digits = penalti.digits.slice(0, -1);
+  } else if (penalti.digits.length < MAX_ENTRY_DIGITS) {
+    // The same leading-zero rule as the Hu pad, so the two keypads cannot disagree
+    // about what `0` then `1` is.
+    penalti.digits = (penalti.digits + key).replace(/^0+(?=\d)/, "");
+  }
+  renderPenaltiFine();
 }
 
 function setPenaltiError(msg) {
@@ -1041,12 +1184,15 @@ function setPenaltiError(msg) {
 function openPenalti(offenderId) {
   const p = store.state().players.find((x) => x.id === offenderId);
   if (!p) return closeSheets();
-  penalti = { offenderId, row: null, kind: null };
+  penalti = { offenderId, row: null, kind: null, digits: "" };
   $("#penalti-who").textContent = p.name;
   setPenaltiError(null);
-  // A row is a real choice with a consequence, so Catat starts disabled and the
-  // flow cannot commit by itself. Same shape as the Hu flow's.
-  $("#penalti-commit").disabled = true;
+  // No row is picked yet, so the pad is away and Catat is shut — a row is a real
+  // choice with a consequence, and the flow must not commit by itself. Both come
+  // from `renderPenaltiFine`, which is the one place that decides them; setting
+  // `disabled` again here would be a second decider that has to keep agreeing.
+  $("#penalti-fine").hidden = true;
+  renderPenaltiFine();
   renderPenaltiRows();
   closeSheets(); // the action sheet hands over — never two scrims, never two dialogs
   show($("#penalti"), $("#scrim"));
@@ -1057,6 +1203,11 @@ function closePenalti() {
   // Emptied on the way out, like the Hu flow: every exit runs through here, so this
   // is the one place the reset belongs, and a closed dialog keeps nothing.
   $("#penalti-rows").replaceChildren();
+  // The pad goes with the rows. It is `hidden` here rather than left showing for the
+  // same reason the Hu tay panel is emptied: an unseen field still holding the last
+  // fine reads as a pre-filled answer the moment anything navigates back to it.
+  $("#penalti-fine-nilai").textContent = "—";
+  $("#penalti-fine").hidden = true;
   setPenaltiError(null);
   hide($("#penalti"));
   hideScrimIfClear();
@@ -1206,6 +1357,11 @@ function wire() {
   $("#hu-commit").addEventListener("click", commitHu);
   for (const b of $$("[data-hu-cancel]")) b.addEventListener("click", closeHu);
 
+  // Delegated, like the Hu pad's — same eleven keys, one listener.
+  $("#penalti-keypad").addEventListener("click", (e) => {
+    const key = e.target.closest("[data-key]");
+    if (key && penalti) pressPenaltiKey(key.dataset.key);
+  });
   $("#penalti-commit").addEventListener("click", commitPenalti);
   for (const b of $$("[data-penalti-cancel]")) b.addEventListener("click", closePenalti);
 
@@ -1234,6 +1390,10 @@ function wire() {
   $("#io-file").addEventListener("change", chooseImportFile);
   $("#io-ya").addEventListener("click", confirmImport);
   $("#io-batal").addEventListener("click", closeIoConfirm);
+
+  $("#selesai-reset").addEventListener("click", openResetConfirm);
+  $("#reset-ya").addEventListener("click", commitReset);
+  $("#reset-batal").addEventListener("click", closeResetConfirm);
 
   // A refusal explains the state the form was in when it was refused, so it stops
   // being true the moment the player edits the form — measured: after "Peminjam dan

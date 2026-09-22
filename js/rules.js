@@ -15,6 +15,23 @@ export const MIN_FU_TAY = 5;
 /** YDSP P7 — a win under 5 Fu is recorded as 10 tay, not as its raw value. */
 export const FU_FLOOR_TAY = 10;
 
+/**
+ * The largest number any typed surface accepts — tay, a penalty fine, a loan
+ * amount, and the starting stack.
+ *
+ * **A sanity bound, not a rules ceiling.** YDSP states no largest legal hand, and
+ * this does not answer that question; the largest Kim-joker hand stays open. The
+ * value is far above anything playable — 9999 tay against a 300 stack charges each
+ * opponent 19,998 — so it never constrains a real game. What it stops is the
+ * failure that was actually measured: `123456` tay, and `1e5` recorded as 100000,
+ * both of which loaded clean and left every balance wrong with Σ still summing to
+ * exactly 0 and nothing flagging it.
+ *
+ * Chandra 2026-09-22, given as "9999 maybe" — recorded as provisional. Digit caps
+ * elsewhere are **derived from this constant**, never written as a second literal.
+ */
+export const MAX_ENTRY = 9999;
+
 /** The citation shown beside the floor warning. Kept here with the numbers it cites. */
 export const FU_FLOOR_CITE = "YDSP P7";
 
@@ -55,8 +72,8 @@ export const HU_METHODS = {
   ceMo:         { label: "Ce Mo",                  selfDraw: true,  cite: "YDSP G2 + P10" }, // YDSP G2 + P10
   ceMoPuCiuJen: { label: "Ce Mo Pu Ciu Jen",       selfDraw: true,  cite: "YDSP G3 + P10" }, // YDSP G3 + P10
   pyongPi:      { label: "Pyong Pi",               selfDraw: true,  cite: "YDSP P10" },      // YDSP P10
-  thiFu:        { label: "Thi Fu",                 selfDraw: true,  cite: "YDSP S37" },      // YDSP S37 — Chandra 2026-09-17
-  thienFu:      { label: "Thien Fu",               selfDraw: true,  cite: "YDSP S38" },      // YDSP S38 — Chandra 2026-09-17
+  thiFu:        { label: "Ti Hu",                  selfDraw: true,  cite: "YDSP S37" },      // Spoken form (Chandra 2026-09-22). YDSP S37 writes "Thi Fu" and the data file keeps it — do NOT "correct" this label back to match scoring-table.mjs.
+  thienFu:      { label: "Thien Hu",               selfDraw: true,  cite: "YDSP S38" },      // Spoken form (Chandra 2026-09-22). YDSP S38 writes "Thien Fu" — same rule as S37 above.
 };
 
 /** Paid in coins at the table, never part of tay. Each opponent pays the collector. */
@@ -73,11 +90,12 @@ export const KOIN = {
  * `pays: false` means the penalty is a restriction, not a point transfer —
  * YDSP P2–P4. It is recorded so the night is traceable, and it moves nothing.
  *
- * `point` has **no v1 row**: every YDSP penalty row that moves points is either
- * already priced by the Hu flow (rows 1 and 10), is the tay floor (row 7), or is
- * excluded pending a settlement shape `settle.js` does not have (rows 5 and 6 —
- * see `PENALTY_EXCLUDED`). The branch is kept because it is correct and priced,
- * not because the UI reaches it today; Task 7 must not build a number pad for it.
+ * `pays: true` means the offender pays a fine to **each** other player. Rows 5 and
+ * 6 are the `point` rows v1 offers, and their amount is **typed per incident**:
+ * YDSP states a consequence for both and never a number, so none is invented here.
+ * The other rows that move points are excluded for their own reasons — already
+ * priced by the Hu flow (rows 1 and 10), or the tay floor rather than a separate
+ * penalty (row 7). See `PENALTY_EXCLUDED`.
  */
 export const PENALTY_KINDS = {
   point:  { label: "Denda poin", pays: true  },
@@ -85,10 +103,19 @@ export const PENALTY_KINDS = {
 };
 
 /**
- * YDSP P2–P4 — the penalty rows v1 actually offers. All three are Lew Fit: the
- * same consequence from three different causes, which is why `row` travels on the
- * event and `kind` alone is not enough. A log reading "Budi — Lew Fit" does not
- * answer the question the log exists to answer, and LAW 4 asks for the *why*.
+ * The YDSP penalty rows v1 actually offers. Rows 2–4 are `lewFit`: one consequence
+ * from three different causes, which is why `row` travels on the event and `kind`
+ * alone is not enough — a log reading "Budi — Lew Fit" does not answer the question
+ * the log exists to answer, and LAW 4 asks for the *why*. Rows 5 and 6 are `point`:
+ * the offender pays an amount typed per incident to each other player.
+ *
+ * Rows 5/6 carry no fixed amount because **YDSP states none** — its value column
+ * gives the consequence ("Pemain yang buang bayar semua"), not a number — so no
+ * number is invented here. They therefore carry a `ydsp` field recording the
+ * consequence the source *does* state, which is what lets the drift guard in
+ * `test/settle.test.js` compare each row against the source without weakening:
+ * it checks `row.ydsp ?? PENALTY_KINDS[row.kind].label`, so the divergence is
+ * declared per row rather than tolerated for the file.
  *
  * Copied from `PENALTIES` in `src/data/scoring-table.mjs` rather than imported.
  * That file is `.mjs` and lives outside `src/app/`, and the build is an asset copy
@@ -105,6 +132,16 @@ export const PENALTY_ROWS = [
     desc: "Cia atau pung yang tidak sesuai, setelah ketauan langsung penalti" },
   { no: 4, name: "Cia / Pung menggunakan kim", kind: "lewFit",
     desc: "Cia atau pung menggunakan kim di dalam cia atau pung nya, setelah ketauan lgs penalti" },
+  // `name` and `desc` are copied verbatim from `PENALTIES` — the guard asserts it,
+  // and a paraphrase fails. `ydsp` carries the source's `value` cell, which for
+  // these two rows states a consequence rather than a number; the amount is typed
+  // per incident at the table.
+  { no: 5, name: "Sudah makan 3 kali pair yang sama", kind: "point",
+    desc: "Sudah makan 3 kali yang sejenis (ban, tong, sok), harus diumumkan oleh pemain yang sudah makan 3 kali tersebut",
+    ydsp: "Pemain yang buang bayar semua" },
+  { no: 6, name: "Sudah pong dua dari tiga naga", kind: "point",
+    desc: "Harus diumumkan oleh pemain yang pung tersebut",
+    ydsp: "Pemain yang buang bayar semua" },
 ];
 
 /**
@@ -119,8 +156,6 @@ export const PENALTY_ROWS = [
  */
 export const PENALTY_EXCLUDED = {
   1:  "sudah dibayar alur Hu — taCung membuat pembuang bayar 2×",
-  5:  "butuh bentuk penyelesaian ketiga yang settle.js belum punya (Chandra 2026-09-17: keluar dari v1)",
-  6:  "butuh bentuk penyelesaian ketiga yang settle.js belum punya (Chandra 2026-09-17: keluar dari v1)",
   7:  "lantai tay di alur Hu (Task 6 step 4) — bukan penalti terpisah",
   8:  "pengingat di alur Hu (Task 6 step 4b) — Ping Fu tidak dihitung",
   9:  "pengingat di alur Hu (Task 6 step 4b) — Ping Fu tidak dihitung",
